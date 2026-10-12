@@ -250,7 +250,10 @@ router.delete('/:id/dose/:date', authenticateToken, async (req, res) => {
 });
 
 // GET /api/reminders/doses?since=YYYY-MM-DD - adherence history for the
-// current user (used by the Reminders page and, later, doctor/caregiver views)
+// current user (used by the Reminders page and, later, doctor/caregiver
+// views). REM-11: also returns a computed adherence percentage over the
+// same window (taken / (taken + skipped + missed)) rather than leaving
+// every caller to recompute it from the raw rows.
 router.get('/doses', authenticateToken, async (req, res) => {
   try {
     const since =
@@ -263,7 +266,15 @@ router.get('/doses', authenticateToken, async (req, res) => {
        ORDER BY dl.dose_date DESC`,
       [req.user.id, since]
     );
-    res.json({ doses: result.rows });
+
+    const counts = { taken: 0, skipped: 0, missed: 0 };
+    for (const row of result.rows) {
+      if (counts[row.status] !== undefined) counts[row.status] += 1;
+    }
+    const totalLogged = counts.taken + counts.skipped + counts.missed;
+    const adherence_percentage = totalLogged > 0 ? Math.round((counts.taken / totalLogged) * 1000) / 10 : null;
+
+    res.json({ doses: result.rows, adherence: { ...counts, total: totalLogged, adherence_percentage } });
   } catch (err) {
     sendError(res, 500, 'Failed to fetch dose history');
   }

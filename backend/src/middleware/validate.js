@@ -159,6 +159,38 @@ const entryCreateSchema = entryBaseSchema
 
 const entryUpdateSchema = entryBaseSchema.partial();
 
+// APPT-7: future-only booking. A grace window (5 minutes) absorbs the
+// gap between the patient picking "now" in the UI and the request
+// actually reaching the server, rather than rejecting a booking the
+// patient made in good faith a few seconds ago.
+const FUTURE_BOOKING_GRACE_MS = 5 * 60 * 1000;
+const appointmentCreateSchema = z.object({
+  entry_id: z.coerce.number().int().positive().optional().nullable(),
+  doctor_name: z.string().trim().max(255).optional(),
+  doctor_id: z.coerce.number().int().positive().optional().nullable(),
+  specialty: z.string().trim().max(255).optional(),
+  scheduled_at: z.coerce.date().refine((d) => d.getTime() >= Date.now() - FUTURE_BOOKING_GRACE_MS, {
+    message: 'Appointments can only be booked for a future date and time'
+  }),
+  status: z.enum(['scheduled', 'completed', 'cancelled']).optional(),
+  notes: z.string().max(2000).optional()
+});
+
+const appointmentUpdateSchema = z.object({
+  entry_id: z.coerce.number().int().positive().optional().nullable(),
+  doctor_name: z.string().trim().max(255).optional(),
+  doctor_id: z.coerce.number().int().positive().optional().nullable(),
+  specialty: z.string().trim().max(255).optional(),
+  scheduled_at: z.coerce
+    .date()
+    .refine((d) => d.getTime() >= Date.now() - FUTURE_BOOKING_GRACE_MS, {
+      message: 'Appointments can only be rescheduled to a future date and time'
+    })
+    .optional(),
+  status: z.enum(['scheduled', 'completed', 'cancelled']).optional(),
+  notes: z.string().max(2000).optional()
+});
+
 module.exports = {
   validateBody,
   registerSchema,
@@ -171,5 +203,7 @@ module.exports = {
   reportGenerateSchema,
   isValidTimeZone,
   entryCreateSchema,
-  entryUpdateSchema
+  entryUpdateSchema,
+  appointmentCreateSchema,
+  appointmentUpdateSchema
 };
