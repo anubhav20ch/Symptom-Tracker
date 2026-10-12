@@ -1,0 +1,228 @@
+requirement_id,status,implementing_files,test_file,test_name_or_manual_check
+AUTH-1,done,backend/src/routes/authRoutes.js,,manual check: POST /api/auth/register with valid payload returns 201 and a user record
+AUTH-2,done,backend/src/routes/authRoutes.js,,manual check: inspect users table — password_hash is a bcrypt hash, never plaintext
+AUTH-3,done,backend/src/routes/authRoutes.js,,manual check: POST /api/auth/login returns a short-lived JWT access token
+AUTH-4,done,backend/src/routes/authRoutes.js,,manual check: login response Set-Cookie header has HttpOnly refresh token
+AUTH-5,done,backend/src/routes/authRoutes.js,,manual check: POST /api/auth/refresh rotates the refresh cookie and revokes the prior token
+AUTH-6,done,backend/src/db/migrations/002_refresh_tokens.sql,,manual check: refresh_tokens table stores only a hash column
+AUTH-7,done,backend/src/routes/authRoutes.js,,manual check: POST /api/auth/logout revokes the current refresh token
+AUTH-8,done,backend/src/routes/authRoutes.js,,manual check: GET and PUT /api/auth/me /profile round-trip
+AUTH-9,done,backend/src/routes/authRoutes.js,,manual check: PUT /api/auth/dark-mode persists across logins
+AUTH-10,partial,backend/src/index.js,,gap: add and test a startup assertion that the process exits if JWT_SECRET is missing/short
+AUTH-11,done,backend/src/middleware/rateLimit.js,,manual check: 11th login attempt in 15 minutes returns 429
+AUTH-12,missing,,,not implemented — password policy on register/change-password
+AUTH-13,missing,,,not implemented — password reset request/token/link
+AUTH-14,missing,,,not implemented — dev SMTP outbox
+AUTH-15,missing,,,not implemented — change-password endpoint
+AUTH-16,missing,,,not implemented — account lock-out after 5 failed attempts/15 min
+AUTH-17,missing,,,not implemented — lock-out auto-expiry
+AUTH-18,missing,,,not implemented — profile time zone field
+AUTH-19,missing,,,not implemented — refresh-token reuse detection
+SYM-1,done,backend/src/routes/symptomRoutes.js,,manual check: GET /api/symptoms returns seeded catalogue
+SYM-2,done,backend/src/routes/symptomRoutes.js,,manual check: GET /api/symptoms/autocomplete?q=
+SYM-3,done,backend/src/routes/symptomRoutes.js,,manual check: POST /api/symptoms as admin
+ENTRY-1,done,backend/src/routes/entryRoutes.js,,manual check: create entry with free text and structured fields
+ENTRY-2,done,backend/src/routes/entryRoutes.js; migration 007,,manual check: numerical biomarker fields persist
+ENTRY-3,done,backend/src/routes/entryRoutes.js,,manual check: POST /:id/attachments with a file
+ENTRY-4,done,backend/src/routes/entryRoutes.js,,manual check: filter list by category/severity/date/search
+ENTRY-5,done,backend/src/routes/entryRoutes.js,,manual check: GET/PUT/DELETE /:id scoped to owner
+ENTRY-6,done,backend/src/routes/entryRoutes.js,,manual check: created entry has classification fields populated
+ENTRY-7,done,frontend/src/pages/LogSymptom.jsx,,manual check: result panel shows confidence + disclaimer
+ENTRY-8,missing,,,not implemented — structured body-region field
+ENTRY-9,missing,,,not implemented — onset/resolution date-time
+ENTRY-10,missing,,,not implemented — follow-up linkage
+ENTRY-11,missing,,,not implemented — server-side validation audit
+NLP-1,done,ml_service/main.py; backend/src/routes/nlpRoutes.js,,manual check: POST /api/nlp/extract
+NLP-2,done,backend/src/routes/nlpRoutes.js,,manual check: POST /api/nlp/smart-analyze
+NLP-3,done,ml_service/main.py,,manual check: POST /api/nlp/predict-disease
+NLP-4,done,ml_service/main.py,,manual check: GET /api/nlp/diseases
+NLP-5,done,backend/src/routes/nlpRoutes.js,,manual check: stop ml_service, confirm keyword fallback still returns a result
+NLP-6,done,backend/src/routes/feedbackRoutes.js,,manual check: POST /api/feedback
+NLP-7,done,backend/src/routes/feedbackRoutes.js,,manual check: GET /api/feedback/stats
+NLP-8,missing,,,not implemented — model version stored with prediction
+NLP-9,missing,,,not implemented — low-confidence UI handling
+NLP-10,missing,,,not implemented — top-3 candidates; identifier-exclusion not verified
+TRIAGE-1,done,backend triage logic,,manual check: entries land in exactly one of 4 tiers
+TRIAGE-2,done,backend triage logic,,manual check: chest pain severity 7 -> Urgent tier
+TRIAGE-3,done,backend triage logic,,manual check: 90+ day duration -> Chronic tier
+TRIAGE-4,done,backend triage logic,,manual check: same symptom x3 in 30 days -> Recurring tier
+TRIAGE-5,done,backend triage logic,,manual check: <14 day isolated occurrence -> Routine tier
+TRIAGE-6,done,backend triage logic,,manual check: tier result includes a specialist recommendation where applicable
+TRIAGE-7,missing,,,not implemented — single versioned triage module
+TRIAGE-8,partial,,,thresholds exist; explicit precedence ordering unverified
+TRIAGE-9,missing,,,not implemented — stored reasoning per result
+TRIAGE-10,partial,,,urgent messaging exists; dedicated always-shown emergency notice unverified
+HIST-1,done,frontend/src/pages/History.jsx; backend entryRoutes.js,,manual check: filters combine correctly
+HIST-2,done,frontend/src/pages/History.jsx,,manual check: severity trend renders
+HIST-3,missing,,,not implemented — column sorting
+HIST-4,missing,,,not implemented — pagination on history table
+HIST-5,missing,,,not implemented — expandable rows
+INSIGHTS-1,done,backend/src/routes/insightsRoutes.js,,manual check: GET /api/insights
+INSIGHTS-2,missing,,,not implemented — associative (non-causal) wording audit
+INSIGHTS-3,missing,,,not implemented — "need N more entries" messaging
+INSIGHTS-4,missing,,,not implemented — trend/table toggle
+MED-1,done,backend/src/routes/medicationRoutes.js,,manual check: CRUD round-trip
+MED-2,done,backend/src/routes/medicationRoutes.js; migration 005,,manual check: medication linked to doctor_id/appointment_id
+MED-3,done,backend/src/routes/medicationRoutes.js,,manual check: PATCH /:id/toggle
+MED-4,done,backend/src/routes/medicationRoutes.js,,manual check: confirm no dosing/interaction logic exists anywhere — must stay this way
+REM-1,done,backend/src/routes/reminderRoutes.js,,manual check: CRUD round-trip
+REM-2,done,frontend/src/pages/Reminders.jsx,,manual check: in-tab chime/alert fires at due time
+REM-3,done,backend scheduler; pushRoutes.js,,manual check: push notification arrives with tab closed, browser open
+REM-4,done,frontend/src/pages/Reminders.jsx,,manual check: permission prompt flow
+REM-5,done,backend/src/routes/reminderRoutes.js; migration 006,,manual check: dose_logs row created on taken/skipped
+REM-6,done,backend/src/routes/reminderRoutes.js,,manual check: GET /doses, DELETE /:id/dose/:date
+REM-7,done,backend/src/routes/pushRoutes.js,,manual check: vapid-public-key/subscribe/unsubscribe
+REM-8,missing,,,not implemented — time-zone-correct scheduling
+REM-9,missing,,,not implemented — idempotent dispatch
+REM-10,missing,,,not implemented — auto-mark missed doses
+REM-11,missing,,,not implemented — adherence percentage computation
+REM-12,missing,,,not implemented — auto-expiry of reminders
+REM-13,missing,,,not implemented — stale push-subscription cleanup
+REM-14,missing,,,not implemented — lock-screen-safe notification text
+APPT-1,done,backend/src/routes/appointmentRoutes.js,,manual check: book against doctor directory
+APPT-2,done,backend/src/routes/appointmentRoutes.js,,manual check: link to a symptom entry
+APPT-3,done,backend/src/routes/appointmentRoutes.js,,manual check: PUT/DELETE scoped to owner
+APPT-4,done,backend/src/routes/appointmentRoutes.js,,manual check: PATCH /:id/status
+APPT-5,missing,,,not implemented — appointment reminder notification
+APPT-6,missing,,,not implemented — slot-conflict rejection
+APPT-7,missing,,,not implemented — future-only booking validation
+APPT-8,missing,,,not implemented — status history table
+APPT-9,missing,,,not implemented — counterpart notification on cancel/reschedule
+REPORT-1,done,backend/src/routes/reportRoutes.js,,manual check: POST /api/reports/generate returns a PDF
+REPORT-2,done,backend/src/routes/reportRoutes.js,,manual check: GET /api/reports lists prior reports
+REPORT-3,missing,,,not implemented — section selection on generate
+REPORT-4,missing,,,not implemented — content checksum
+REPORT-5,missing,,,not implemented — physician-access-gated download
+CARE-1,done,backend/src/routes/caregiverRoutes.js,,manual check: POST /api/caregiver/generate
+CARE-2,done,backend/src/routes/caregiverRoutes.js,,manual check: GET /api/caregiver/view/:token with no auth
+CARE-3,partial,backend/src/routes/caregiverRoutes.js,,gap: verify expired token is rejected, add a test
+CARE-4,missing,,,not implemented — list active share links
+CARE-5,missing,,,not implemented — revoke a share link
+CARE-6,missing,,,not implemented — scoped sections per link
+CARE-7,missing,,,not implemented — access logging per link
+DOC-1,done,backend/src/db/migrations/003_doctor_portal.sql,,manual check: doctors table has own credentials/specialty/registration number
+DOC-2,done,backend/src/routes/doctorRoutes.js,,manual check: POST /api/doctors/login issues separate token/cookie scope
+DOC-3,done,backend/src/routes/doctorRoutes.js,,manual check: refresh/logout parity with patient flow
+DOC-4,done,backend/src/routes/doctorRoutes.js,,manual check: GET /api/doctors/directory is public
+DOC-5,done,backend/src/routes/doctorRoutes.js,,manual check: GET /api/doctors/me
+DOC-6,done,backend/src/routes/doctorRoutes.js,,manual check: GET /api/doctors/appointments includes patient age/gender/entry/notes
+DOC-7,done,backend/src/routes/doctorRoutes.js,,manual check: PATCH /:id/review
+DOC-8,done,backend/src/routes/doctorRoutes.js,,manual check: POST /:id/prescribe + GET prescriptions
+DOC-9,partial,backend/src/routes/doctorRoutes.js,,gap: confirm every patient-data endpoint re-checks an active appointment link, add a test
+DOC-10,done,backend/src/routes/doctorRoutes.js,,manual check: prescription appears in patient's medications list
+DOC-11,done,backend/src/pages/DoctorPortal.jsx,,gap: redesign as a sorted worklist view (Phase 5)
+DOC-12,missing,,,not implemented — look-back-window access expiry
+ADMIN-1,done,backend/src/db/migrations/004_admin_portal.sql; adminRoutes.js,,manual check: POST /api/admin/login
+ADMIN-2,done,backend/src/routes/adminRoutes.js,,manual check: GET /me, POST /logout
+ADMIN-3,done,backend/src/routes/adminRoutes.js,,manual check: GET /stats
+ADMIN-4,done,backend/src/routes/adminRoutes.js,,manual check: create/delete a doctor, confirm no orphaned appointments
+ADMIN-5,done,backend/src/routes/adminRoutes.js,,manual check: GET/PUT appointments system-wide
+ADMIN-6,done,backend/src/routes/adminRoutes.js,,manual check: GET /dataset/status
+ADMIN-7,done,backend/src/routes/adminRoutes.js,,manual check: POST /dataset/upload with a malformed file returns a clear error
+ADMIN-8,done,backend/src/routes/adminRoutes.js; ml_service/main.py,,manual check: retraining triggers from an uploaded dataset
+ADMIN-9,done,backend/src/middleware/rateLimit.js,,manual check: admin login rate-limited same as patient/doctor
+ADMIN-10,missing,,,not implemented — audit log viewer
+ADMIN-11,missing,,,not implemented — class-balance stats on upload
+ADMIN-12,missing,,,not implemented — async retraining job + polling
+ADMIN-13,missing,,,not implemented — metrics-gated activation
+ADMIN-14,missing,,,not implemented — rollback to prior model version
+ADMIN-15,missing,,,not implemented — model version history view
+SEC-1,done,backend/src/routes/authRoutes.js,,manual check: bcrypt hash in DB
+SEC-2,done,backend/src/routes/authRoutes.js,,manual check: single-use rotating refresh token
+SEC-3,done,backend/src (parameterized queries throughout),,manual check: code review for string-concatenated SQL
+SEC-4,done,backend/src/index.js (helmet),,manual check: response headers include helmet defaults
+SEC-5,done,backend/src/index.js (CORS allowlist),,manual check: disallowed origin is rejected
+SEC-6,done,backend/src/middleware/rateLimit.js,,manual check: 429 after 10 attempts/15 min
+SEC-7,partial,backend/src/index.js,,gap: same as AUTH-10
+SEC-8,partial,backend/src/routes/authRoutes.js,,gap: confirm zod coverage on every listed route
+SEC-9,done,backend/src/index.js,,manual check: production error response hides stack trace
+SEC-10,partial,backend/src/routes/entryRoutes.js,,gap: confirm attachment upload size/type limits
+SEC-11,partial,backend/src/routes/caregiverRoutes.js,,gap: same as CARE-3
+SEC-12,done,backend/src/routes/*,,manual check: user A cannot fetch user B's entry by id
+SEC-13,missing,,,not implemented — CSRF protection
+SEC-14,partial,backend/src/index.js; frontend/nginx.conf,,gap: enable CSP by default + add nginx security headers
+SEC-15,missing,,,not implemented — file-signature validation
+SEC-16,missing,,,not implemented — authenticated file-serving endpoint
+SEC-17,missing,,,not implemented — SEED_DEMO gate
+SEC-18,partial,backend/.env.example,,gap: add v1.1 variables as placeholders
+SEC-19,partial,backend/src/index.js,,gap: general JSON body-size limit
+SEC-20,missing,,,not implemented — CI dependency audit
+SEC-21,missing,,,not implemented — ML call timeout/retry
+AUDIT-1,missing,,,not implemented — audit_logs table + auth-event writes
+AUDIT-2,missing,,,not implemented — cross-ownership access writes
+AUDIT-3,missing,,,not implemented — admin-only immutable audit read endpoint
+PERF-1,done,backend (interactive routes),,manual check: sub-second response on local/LAN
+PERF-2,done,backend scheduler (node-cron),,manual check: 1-minute tick cadence
+PERF-3,done,frontend/src/pages/Reminders.jsx,,manual check: short-interval in-tab poll
+PERF-4,done,SymptomLog_Project_Report.docx (model metrics),,manual check: re-run holdout evaluation
+PERF-5,partial,backend/src/routes/entryRoutes.js etc.,,gap: confirm default page size on every list endpoint
+PERF-7,missing,,,not implemented — bundle-size budget + Lighthouse CI
+REL-1,done,backend/src/routes/nlpRoutes.js (fallback),,manual check: stop ml_service, confirm fallback
+REL-2,done,backend/src/routes/reminderRoutes.js; migration 006,,manual check: dose_logs persists across cleared browser storage
+REL-3,done,docker-compose.yml,,manual check: dependent service waits on healthy dependency
+REL-4,done,backend/src/db/migrate.js,,manual check: re-run migrate twice, confirm idempotence
+USE-1,done,frontend/src/pages/LogSymptom.jsx,,manual check: free text is a first-class field
+USE-2,done,frontend result display,,manual check: confidence + disclaimer shown
+USE-3,done,frontend design system,,manual check: theme toggle persists
+USE-4,done,frontend/src/pages/Reminders.jsx; pushRoutes.js,,manual check: two alarm layers both present
+MAIN-1,done,backend/src/db/migrations,,manual check: migration tracking table
+MAIN-2,done,backend/src/routes/nlpRoutes.js,,manual check: mock/real classifier swap point
+MAIN-3,done,repo structure (3 services),,manual check: each service runs independently
+MAIN-5,partial,SymptomLog_Launch_Guide.docx,,gap: write a dedicated runbook
+MAIN-7,missing,,,not implemented — rollback scripts for 7 existing migrations
+PORT-1,done,backend/src/db,,manual check: run against SQLite then PostgreSQL unchanged
+PORT-2,done,docker-compose.yml,,manual check: compose up on Linux/macOS/Windows+Docker Desktop
+CLIN-1,done,frontend disclaimers,,manual check: disclaimer visible on every result
+CLIN-2,done,backend triage logic,,manual check: red-flag bypasses home-care advice
+CLIN-3,done,frontend disclaimers,,manual check: emergency-services wording present
+CLIN-4,partial,frontend copy,,gap: audit every predictive string for hedged phrasing
+CLIN-5,missing,,,not implemented — static dated self-care content with review label
+API-1,missing,,,not implemented — consistent error envelope
+API-2,missing,,,not implemented — OpenAPI docs at /api/docs
+API-3,partial,backend/src/routes/entryRoutes.js etc.,,gap: pagination on remaining list endpoints
+OBS-1,partial,backend/src/index.js,,gap: structured JSON logs with request id, no health content
+OBS-2,missing,,,not implemented — distinct /api/health and /api/ready
+DEPLOY-1,done,backend (native run against SQLite),,manual check: run without Docker
+DEPLOY-2,done,docker-compose.yml,,manual check: docker compose up --build
+DEPLOY-3,done,docker-compose.yml healthchecks,,manual check: dependent service gated on health
+DEPLOY-4,done,backend/Dockerfile; frontend/Dockerfile,,manual check: containers run as non-root
+DEPLOY-5,done,docker-compose.yml volumes,,manual check: restart container, data persists
+DEPLOY-6,done,frontend/Dockerfile; nginx.conf,,manual check: VITE_API_URL build arg
+DEPLOY-7,done,backend/src/db/migrate.js,,manual check: re-run migrate, only new files applied
+DEPLOY-11,missing,,,not implemented — CI container health-check gate
+UI-1,done,frontend/src/App.jsx; pages/*,,manual check: every listed page renders
+UI-2,done,frontend/src/App.jsx (protected routes),,manual check: unauthenticated redirect to login
+UI-3,done,frontend nav bar; theme toggle,,manual check: nav links every page
+UI-4,done,frontend/src/pages/CaregiverView.jsx,,manual check: no auth required
+UI-5,done,frontend axios client,,manual check: 401 triggers silent refresh-and-retry
+UI-6,missing,,,not implemented — sidebar/tab-bar layout
+UI-7,missing,,,not implemented — Overview main+rail layout
+UI-8,missing,,,not implemented — chip-editor side panel
+UI-9,missing,,,not implemented — body-map control
+UI-10,missing,,,not implemented — redesigned result panel
+UI-11,missing,,,not implemented — dense sortable/paginated history table
+UI-12,missing,,,not implemented — fixed-axis trend chart with markers
+UI-13,missing,,,not implemented — day-timeline medicines page + alertdialog
+UI-14,missing,,,not implemented — three-pane physician portal
+UI-15,missing,,,not implemented — PWA manifest/service worker (app shell)
+UI-16,missing,,,not implemented — public pages (Home, How triage works, Privacy, Disclaimer, Help)
+DASH-1,missing,,,not implemented
+DASH-2,missing,,,not implemented
+DASH-3,missing,,,not implemented
+DASH-4,missing,,,not implemented
+DASH-5,missing,,,not implemented
+A11Y-1,missing,,,not implemented — audit for colour-only tier/severity signalling
+A11Y-2,missing,,,not implemented — contrast audit
+A11Y-3,missing,,,not implemented — keyboard-nav audit
+A11Y-4,missing,,,not implemented — alertdialog focus trap
+A11Y-5,missing,,,not implemented — visible label audit
+A11Y-6,missing,,,not implemented — announced error summaries
+A11Y-7,missing,,,not implemented — text alternatives for icons/markers
+A11Y-8,missing,,,not implemented — prefers-reduced-motion support
+TEST-1,missing,,,not implemented — triage boundary unit tests
+TEST-2,missing,,,not implemented — patient isolation integration tests
+TEST-3,missing,,,not implemented — physician least-privilege integration tests
+TEST-4,missing,,,not implemented — ML contract + fallback tests
+TEST-5,missing,,,not implemented — Playwright smoke e2e
+TEST-6,missing,,,not implemented — component tests
+TEST-7,missing,,,not implemented — synthetic-only seed/test data audit
