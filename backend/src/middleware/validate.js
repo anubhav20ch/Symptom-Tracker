@@ -104,11 +104,14 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 // start_date/end_date are required rather than optional: a report silently
 // generated for "all time" when no range was picked looked like it had
 // respected the (empty) form, when it had actually ignored it.
+// REPORT-3: which sections to include, chosen by the patient per report.
+const REPORT_SECTIONS = ['symptoms', 'medications', 'appointments'];
 const reportGenerateSchema = z
   .object({
     start_date: z.string().regex(DATE_ONLY, 'A start date is required (YYYY-MM-DD)'),
     end_date: z.string().regex(DATE_ONLY, 'An end date is required (YYYY-MM-DD)'),
-    title: z.string().trim().min(1).max(255).optional()
+    title: z.string().trim().min(1).max(255).optional(),
+    sections: z.array(z.enum(REPORT_SECTIONS)).min(1).optional()
   })
   .refine((data) => new Date(data.start_date) <= new Date(data.end_date), {
     message: 'Start date must be on or before the end date',
@@ -205,5 +208,6 @@ module.exports = {
   entryCreateSchema,
   entryUpdateSchema,
   appointmentCreateSchema,
-  appointmentUpdateSchema
+  appointmentUpdateSchema,
+  REPORT_SECTIONS
 };

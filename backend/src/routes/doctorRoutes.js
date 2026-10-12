@@ -185,14 +185,35 @@ router.get('/me', authenticateDoctor, async (req, res) => {
   res.json({ doctor: req.doctor });
 });
 
+// DOC-12: a physician's access to a patient lapses if no appointment
+// between them falls within this look-back window -- so GET /appointments
+// below only surfaces a patient relationship that is still "current" by
+// that measure, not every appointment ever assigned to this doctor no
+// matter how old. A patient the doctor still has a recent appointment
+// with keeps full history visible; one they haven't seen in over a year
+// (and have nothing upcoming with) drops out of the list entirely.
+const DOCTOR_ACCESS_LOOKBACK_DAYS = 180;
+
 // GET /api/doctor/appointments - All appointments linked to this doctor's
 // account, read-only patient context (name + linked symptom entry details).
 router.get('/appointments', authenticateDoctor, async (req, res) => {
   try {
     const { limit, offset } = parsePagination(req.query);
+    const lookbackCutoff = new Date(
+      Date.now() - DOCTOR_ACCESS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+    ).toISOString();
+
     const countResult = await query(
-      'SELECT COUNT(*) as total FROM appointments WHERE doctor_id = $1',
-      [req.doctor.id]
+      `SELECT COUNT(*) as total FROM appointments a
+       WHERE a.doctor_id = $1
+         AND (
+           a.scheduled_at >= $2
+           OR EXISTS (
+             SELECT 1 FROM appointments a2
+             WHERE a2.doctor_id = a.doctor_id AND a2.user_id = a.user_id AND a2.scheduled_at >= $2
+           )
+         )`,
+      [req.doctor.id, lookbackCutoff]
     );
     const total = parseInt(countResult.rows[0]?.total ?? 0, 10);
 
@@ -211,9 +232,16 @@ router.get('/appointments', authenticateDoctor, async (req, res) => {
        LEFT JOIN symptom_entries se ON a.entry_id = se.id
        LEFT JOIN symptoms s ON se.symptom_id = s.id
        WHERE a.doctor_id = $1
+         AND (
+           a.scheduled_at >= $4
+           OR EXISTS (
+             SELECT 1 FROM appointments a2
+             WHERE a2.doctor_id = a.doctor_id AND a2.user_id = a.user_id AND a2.scheduled_at >= $4
+           )
+         )
        ORDER BY a.scheduled_at DESC
        LIMIT $2 OFFSET $3`,
-      [req.doctor.id, limit, offset]
+      [req.doctor.id, limit, offset, lookbackCutoff]
     );
     // AUDIT-2: a physician reading patient data, even within their own
     // authorized appointment list, is exactly the access PRIV-4 (Phase 4)

@@ -34,6 +34,7 @@ const caregiverRoutes = require('./routes/caregiverRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const pushRoutes = require('./routes/pushRoutes');
 const { startReminderScheduler } = require('./services/reminderScheduler');
+const { startAppointmentReminderScheduler } = require('./services/appointmentReminderScheduler');
 
 const app = express();
 
@@ -178,6 +179,7 @@ async function startServer() {
   try {
     await initDB();
     startReminderScheduler();
+    startAppointmentReminderScheduler();
     app.listen(config.port, () => {
       logger.info(
         { port: config.port, dbMode: getDbMode(), nodeEnv: config.nodeEnv },

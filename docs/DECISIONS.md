@@ -20,6 +20,36 @@ The SRS has 233 distinct requirement IDs across v1.0 and v1.1. Rather than a bin
 
 **Decision:** `docs/GAP_ANALYSIS.md` rows cite the exact files inspected and the specific missing piece, so each "Partial" or "Missing" row is independently actionable without re-deriving the audit.
 
+## 2026-10-13 — Phase 3: missed-dose detection has a documented midnight edge case
+
+REM-10's missed-dose check compares "now" against "today's" scheduled occurrence in the patient's own time zone, using the current local date to look up (and insert) the `dose_logs` row. A reminder scheduled within the grace period's width of local midnight (e.g. 23:30 with a 60-minute grace) can roll into the next calendar day before the grace period elapses -- by the time the check would fire, `localDate` has already advanced, and the scheduler only ever evaluates "is today's occurrence overdue," never "was yesterday's."
+
+**Decision:** left as a documented, narrow limitation rather than building a two-day lookback (checking both today's and yesterday's occurrence every tick). The window affected is at most the grace period's width (60 minutes) out of each day, and the existing precedent in this codebase (v1.0's own documented limitations around sleep/wake timing and closed-browser push delivery) is to name a real, narrow gap rather than add real complexity for it. Noted in `backend/src/services/reminderScheduler.js` and here.
+
+## 2026-10-13 — Phase 3: a fixed 30-minute appointment slot width, since none is modeled
+
+APPT-6 requires rejecting a double-booked physician slot, but the `appointments` table has no duration column — only a single `scheduled_at` instant.
+
+**Decision:** added a named, documented constant (`SLOT_DURATION_MINUTES = 30` in `backend/src/utils/appointments.js`) rather than inferring a duration from specialty or appointment type, which isn't data the system has. Two appointments for the same physician within 30 minutes of each other are treated as conflicting. This is a reasonable default, not a clinical scheduling standard, and is called out as tunable in the code.
+
+## 2026-10-13 — Phase 3: DOC-12 and REPORT-5 share one look-back window, applied narrowly
+
+DOC-12 (physician access lapses without a recent appointment) and REPORT-5 (report download requires an active appointment link) are two different SRS requirements but describe the same underlying relationship test.
+
+**Decision:** both use the same 180-day constant and the same "at least one non-cancelled appointment within the window, for this specific doctor+patient pair" query shape, rather than inventing two different lookback periods or relationship definitions that could silently drift apart. DOC-12 is applied to the doctor's own appointment list (an EXISTS-based keep/exclude per patient, preserving full history once an ongoing relationship is established); REPORT-5 is a simpler point check at download time. Neither restricts a doctor's access to an appointment they are *currently, directly* assigned to (`POST /prescribe`, `PATCH /review`) -- those already require the appointment's own `doctor_id` to match and are not time-windowed, since revoking access to an appointment the doctor is actively handling isn't what either requirement asks for.
+
+## 2026-10-13 — Phase 3: caregiver share list never re-exposes the raw token
+
+CARE-4 asks for a list of a patient's share links. The raw token is a bearer credential -- anyone holding it can view the shared summary with no further authentication.
+
+**Decision:** `GET /api/caregiver/shares` returns `token_suffix` (last 8 characters) instead of the full token, enough for the patient to recognize which link is which (matching against what they already copied/sent) without the list endpoint becoming a second way to retrieve a live credential. The full token is only ever returned once, at generation time, consistent with how refresh tokens and other secrets are handled throughout this codebase.
+
+## 2026-10-13 — Phase 3: APPT-9 counterpart notification reuses the dev mail outbox, not push
+
+APPT-9 requires notifying the counterpart (patient or physician) on cancellation/reschedule. Push notifications (the system's only other live notification channel) are wired to patient accounts via `push_subscriptions`, keyed by `user_id` -- there is no equivalent subscription mechanism for physicians.
+
+**Decision:** used the existing `mailService` (dev outbox locally, a real provider required in production -- see the AUTH-14 decision above) for both directions, rather than building a doctor-side push subscription system or treating patient and physician notifications through two different channels. This is deliberately the same infrastructure Phase 1's password-reset email uses, so there is exactly one "send mail" seam in the codebase, not several.
+
 ## 2026-10-13 — Phase 2: model version is a timestamp, not a registry entry
 
 NLP-8 asks for a model version stored with every prediction. The ML service has no model registry yet (ADMIN-13..15, which govern versioned activation/rollback, are explicitly Phase 4 scope).

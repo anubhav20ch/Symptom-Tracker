@@ -72,34 +72,34 @@ REM-4,done,frontend/src/pages/Reminders.jsx,,manual check: permission prompt flo
 REM-5,done,backend/src/routes/reminderRoutes.js; migration 006,,manual check: dose_logs row created on taken/skipped
 REM-6,done,backend/src/routes/reminderRoutes.js,,manual check: GET /doses, DELETE /:id/dose/:date
 REM-7,done,backend/src/routes/pushRoutes.js,,manual check: vapid-public-key/subscribe/unsubscribe
-REM-8,missing,,,not implemented — time-zone-correct scheduling
-REM-9,missing,,,not implemented — idempotent dispatch
-REM-10,missing,,,not implemented — auto-mark missed doses
-REM-11,missing,,,not implemented — adherence percentage computation
-REM-12,missing,,,not implemented — auto-expiry of reminders
-REM-13,missing,,,not implemented — stale push-subscription cleanup
-REM-14,missing,,,not implemented — lock-screen-safe notification text
+REM-8,done,backend/src/utils/timezoneClock.js; services/reminderScheduler.js,backend/tests/timezoneClock.test.js,4 passing conversion tests; manual check with a controlled Asia/Kolkata reminder
+REM-9,done,backend/src/services/reminderScheduler.js (DISPATCH_DEDUPE_WINDOW_MS),,manual check: two consecutive checkAndNotify() ticks against one due-now reminder only dispatch once
+REM-10,done,backend/src/services/reminderScheduler.js (markMissedDoses),,manual check: 2-hours-overdue controlled reminder produces a missed dose_logs row
+REM-11,done,backend/src/routes/reminderRoutes.js (GET /doses),,manual check: adherence object present with correct taken/skipped/missed counts and percentage
+REM-12,done,backend/src/routes/reminderRoutes.js,,already implemented in v1.0; corrected gap-analysis entry, no change needed
+REM-13,done,backend/src/services/reminderScheduler.js (dispatchPush),,already implemented in v1.0; corrected gap-analysis entry, no change needed
+REM-14,done,backend/src/services/reminderScheduler.js (dispatchPush payload),,manual check: push payload text is neutral regardless of reminder label
 APPT-1,done,backend/src/routes/appointmentRoutes.js,,manual check: book against doctor directory
 APPT-2,done,backend/src/routes/appointmentRoutes.js,,manual check: link to a symptom entry
 APPT-3,done,backend/src/routes/appointmentRoutes.js,,manual check: PUT/DELETE scoped to owner
 APPT-4,done,backend/src/routes/appointmentRoutes.js,,manual check: PATCH /:id/status
-APPT-5,missing,,,not implemented — appointment reminder notification
-APPT-6,missing,,,not implemented — slot-conflict rejection
-APPT-7,missing,,,not implemented — future-only booking validation
-APPT-8,missing,,,not implemented — status history table
-APPT-9,missing,,,not implemented — counterpart notification on cancel/reschedule
+APPT-5,done,backend/src/services/appointmentReminderScheduler.js,,manual check: direct sendDueAppointmentReminders() invocation against a controlled 2-hours-out appointment sets reminder_sent_at
+APPT-6,done,backend/src/utils/appointments.js (hasSlotConflict),,manual check: booking/rescheduling within 30 minutes of an existing non-cancelled appointment for the same doctor returns 409 APPOINTMENT_SLOT_CONFLICT
+APPT-7,done,backend/src/middleware/validate.js (appointmentCreateSchema/appointmentUpdateSchema),,manual check: a past scheduled_at is rejected; a 5-minute grace window absorbs request latency
+APPT-8,done,backend/src/utils/appointments.js (recordStatusChange); migration 011,,manual check: GET /appointments/:id/status-history returns old->new rows after a status change
+APPT-9,done,backend/src/utils/appointments.js (notifyCounterpart),,manual check: cancel/reschedule writes a dev-outbox mail entry addressed to the assigned physician
 REPORT-1,done,backend/src/routes/reportRoutes.js,,manual check: POST /api/reports/generate returns a PDF
 REPORT-2,done,backend/src/routes/reportRoutes.js,,manual check: GET /api/reports lists prior reports
-REPORT-3,missing,,,not implemented — section selection on generate
-REPORT-4,missing,,,not implemented — content checksum
-REPORT-5,missing,,,not implemented — physician-access-gated download
+REPORT-3,done,backend/src/routes/reportRoutes.js; middleware/validate.js (REPORT_SECTIONS),,manual check: generating with sections=[medications,appointments] omits symptom-entry data entirely
+REPORT-4,done,backend/src/routes/reportRoutes.js (sha256File); migration 013,,manual check: appending bytes to the stored PDF causes the next download to return 409 REPORT_CHECKSUM_MISMATCH
+REPORT-5,done,backend/src/middleware/auth.js (authenticatePatientOrDoctor),,manual check: unlinked doctor gets 403 NO_ACTIVE_APPOINTMENT_LINK; linked doctor succeeds; owning patient always succeeds
 CARE-1,done,backend/src/routes/caregiverRoutes.js,,manual check: POST /api/caregiver/generate
 CARE-2,done,backend/src/routes/caregiverRoutes.js,,manual check: GET /api/caregiver/view/:token with no auth
 CARE-3,partial,backend/src/routes/caregiverRoutes.js,,gap: verify expired token is rejected, add a test
-CARE-4,missing,,,not implemented — list active share links
-CARE-5,missing,,,not implemented — revoke a share link
-CARE-6,missing,,,not implemented — scoped sections per link
-CARE-7,missing,,,not implemented — access logging per link
+CARE-4,done,backend/src/routes/caregiverRoutes.js (GET /shares),,manual check: lists created share links with access_count, never re-exposing the raw token
+CARE-5,done,backend/src/routes/caregiverRoutes.js (DELETE /shares/:id); migration 012,,manual check: revoked link returns 410 on next view
+CARE-6,done,backend/src/routes/caregiverRoutes.js (scope); migration 012,,manual check: a medications-only link's view response has no entries/appointments keys
+CARE-7,done,backend/src/routes/caregiverRoutes.js (caregiver_share_access_log); migration 012,,manual check: GET /shares/:id/access-log shows a row after a view
 DOC-1,done,backend/src/db/migrations/003_doctor_portal.sql,,manual check: doctors table has own credentials/specialty/registration number
 DOC-2,done,backend/src/routes/doctorRoutes.js,,manual check: POST /api/doctors/login issues separate token/cookie scope
 DOC-3,done,backend/src/routes/doctorRoutes.js,,manual check: refresh/logout parity with patient flow
@@ -108,10 +108,10 @@ DOC-5,done,backend/src/routes/doctorRoutes.js,,manual check: GET /api/doctors/me
 DOC-6,done,backend/src/routes/doctorRoutes.js,,manual check: GET /api/doctors/appointments includes patient age/gender/entry/notes
 DOC-7,done,backend/src/routes/doctorRoutes.js,,manual check: PATCH /:id/review
 DOC-8,done,backend/src/routes/doctorRoutes.js,,manual check: POST /:id/prescribe + GET prescriptions
-DOC-9,partial,backend/src/routes/doctorRoutes.js,,gap: confirm every patient-data endpoint re-checks an active appointment link, add a test
+DOC-9,done,backend/src/routes/doctorRoutes.js,,confirmed by full-file review: every patient-data endpoint is already scoped by doctor_id
 DOC-10,done,backend/src/routes/doctorRoutes.js,,manual check: prescription appears in patient's medications list
 DOC-11,done,backend/src/pages/DoctorPortal.jsx,,gap: redesign as a sorted worklist view (Phase 5)
-DOC-12,missing,,,not implemented — look-back-window access expiry
+DOC-12,done,backend/src/routes/doctorRoutes.js (DOCTOR_ACCESS_LOOKBACK_DAYS),,manual check: a patient with only a 300-day-old appointment is excluded from GET /appointments; one with a recent appointment keeps full history
 ADMIN-1,done,backend/src/db/migrations/004_admin_portal.sql; adminRoutes.js,,manual check: POST /api/admin/login
 ADMIN-2,done,backend/src/routes/adminRoutes.js,,manual check: GET /me, POST /logout
 ADMIN-3,done,backend/src/routes/adminRoutes.js,,manual check: GET /stats

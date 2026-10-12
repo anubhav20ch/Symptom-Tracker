@@ -123,7 +123,9 @@ paths:
     put: { tags: [Entries], summary: 'Update a symptom entry (ENTRY-5)' }
     delete: { tags: [Entries], summary: 'Delete a symptom entry (ENTRY-5)' }
   /entries/{id}/attachments:
-    post: { tags: [Entries], summary: 'Attach a file to a symptom entry (ENTRY-3)' }
+    post: { tags: [Entries], summary: 'Attach a file to a symptom entry; magic-byte signature checked (ENTRY-3, SEC-15)' }
+  /entries/{id}/attachments/{attachmentId}/file:
+    get: { tags: [Entries], summary: 'Download an attachment; owning patient only, no static mount (SEC-16)' }
   /nlp/smart-analyze:
     post: { tags: [NLP], summary: 'Combined extraction + numerical biomarker analysis (NLP-2)' }
   /nlp/numerical-stats:
@@ -158,12 +160,14 @@ paths:
     patch: { tags: [Medications], summary: 'Enable/disable a medication (MED-3)' }
   /appointments:
     get: { tags: [Appointments], summary: "List the patient's appointments (APPT-3)" }
-    post: { tags: [Appointments], summary: 'Book an appointment against the physician directory (APPT-1)' }
+    post: { tags: [Appointments], summary: 'Book an appointment against the physician directory; future-only, slot-conflict-checked (APPT-1, APPT-6, APPT-7)' }
   /appointments/{id}:
-    put: { tags: [Appointments], summary: 'Update an appointment (APPT-3)' }
-    delete: { tags: [Appointments], summary: 'Cancel an appointment (APPT-3)' }
+    put: { tags: [Appointments], summary: 'Update an appointment; reschedule notifies the assigned physician (APPT-3, APPT-6, APPT-9)' }
+    delete: { tags: [Appointments], summary: 'Cancel an appointment; notifies the assigned physician (APPT-3, APPT-9)' }
   /appointments/{id}/status:
-    patch: { tags: [Appointments], summary: 'Update appointment status (APPT-4)' }
+    patch: { tags: [Appointments], summary: 'Update appointment status; recorded in status history (APPT-4, APPT-8)' }
+  /appointments/{id}/status-history:
+    get: { tags: [Appointments], summary: 'Full status history for an appointment, not just the current status (APPT-8)' }
   /feedback:
     post: { tags: [Feedback], summary: 'Rate a classification helpful/not-helpful (NLP-6)' }
   /feedback/stats:
@@ -171,14 +175,21 @@ paths:
   /reports:
     get: { tags: [Reports], summary: 'List previously generated reports (REPORT-2)' }
   /reports/generate:
-    post:
-      { tags: [Reports], summary: 'Generate a PDF clinical summary for a date range (REPORT-1)' }
+    post: { tags: [Reports], summary: 'Generate a PDF clinical summary with selectable sections and a stored checksum (REPORT-1, REPORT-3, REPORT-4)' }
+  /reports/{id}/file:
+    get: { tags: [Reports], summary: 'Download a report PDF; owning patient or a physician with an active appointment link only (SEC-16, REPORT-5)' }
   /insights:
     get: { tags: [Insights], summary: 'Aggregated symptom-pattern summary (INSIGHTS-1)' }
   /caregiver/generate:
     post: { tags: [Caregiver], summary: 'Generate a time-limited caregiver share link (CARE-1)' }
   /caregiver/view/{token}:
-    get: { tags: [Caregiver], summary: 'View a shared summary by token, no auth required (CARE-2)' }
+    get: { tags: [Caregiver], summary: 'View a shared summary by token, no auth required (CARE-2, CARE-6)' }
+  /caregiver/shares:
+    get: { tags: [Caregiver], summary: 'List every share link this patient has created (CARE-4)' }
+  /caregiver/shares/{id}:
+    delete: { tags: [Caregiver], summary: 'Revoke a share link before its natural expiry (CARE-5)' }
+  /caregiver/shares/{id}/access-log:
+    get: { tags: [Caregiver], summary: 'Every access to this share link, visible to the owning patient (CARE-7)' }
   /push/vapid-public-key:
     get: { tags: [Push], summary: 'Get the VAPID public key for push registration (REM-7)' }
   /push/subscribe:

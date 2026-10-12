@@ -2,12 +2,17 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { query } = require('../config/db');
-const { authenticateToken } = require('../middleware/auth');
-const { validateBody, reportGenerateSchema } = require('../middleware/validate');
+const { authenticateToken, authenticatePatientOrDoctor } = require('../middleware/auth');
+const { validateBody, reportGenerateSchema, REPORT_SECTIONS } = require('../middleware/validate');
 const { generateDoctorReport } = require('../services/pdfService');
 const { parsePagination, paginatedResponse } = require('../utils/pagination');
 const { sendError } = require('../utils/apiError');
+
+function sha256File(absolutePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(absolutePath)).digest('hex');
+}
 
 // GET /api/reports - List user generated reports (API-3, PERF-5)
 //
@@ -54,7 +59,12 @@ router.post(
   validateBody(reportGenerateSchema),
   async (req, res) => {
     try {
-      const { start_date, end_date, title = 'Patient Clinical Symptom Summary' } = req.body;
+      const {
+        start_date,
+        end_date,
+        title = 'Patient Clinical Symptom Summary',
+        sections = REPORT_SECTIONS
+      } = req.body;
 
       // end_date arrives as a bare YYYY-MM-DD date; used as-is it would act as
       // midnight at the start of that day and silently exclude every entry
@@ -62,36 +72,43 @@ router.post(
       // October 8th" actually includes October 8th.
       const endOfDay = `${end_date}T23:59:59.999`;
 
-      // 1. Fetch entries within date range
-      const entriesRes = await query(
-        `SELECT se.*, s.name as symptom_name, s.category as symptom_category
-       FROM symptom_entries se
-       JOIN symptoms s ON se.symptom_id = s.id
-       WHERE se.user_id = $1 AND se.started_at >= $2 AND se.started_at <= $3
-       ORDER BY se.started_at DESC`,
-        [req.user.id, start_date, endOfDay]
-      );
-      const entries = entriesRes.rows;
+      // REPORT-3: only fetch (and therefore only include) the sections the
+      // patient asked for. pdfService already renders a section as empty
+      // when given [], so excluding one is just never querying for it.
+      let entries = [];
+      if (sections.includes('symptoms')) {
+        const entriesRes = await query(
+          `SELECT se.*, s.name as symptom_name, s.category as symptom_category
+         FROM symptom_entries se
+         JOIN symptoms s ON se.symptom_id = s.id
+         WHERE se.user_id = $1 AND se.started_at >= $2 AND se.started_at <= $3
+         ORDER BY se.started_at DESC`,
+          [req.user.id, start_date, endOfDay]
+        );
+        entries = entriesRes.rows;
+      }
 
-      // 2. Fetch active medications
-      const medsRes = await query(
-        'SELECT * FROM medications WHERE user_id = $1 AND (active = 1 OR active = true)',
-        [req.user.id]
-      );
-      const medications = medsRes.rows;
+      let medications = [];
+      if (sections.includes('medications')) {
+        const medsRes = await query(
+          'SELECT * FROM medications WHERE user_id = $1 AND (active = 1 OR active = true)',
+          [req.user.id]
+        );
+        medications = medsRes.rows;
+      }
 
-      // 3. Fetch appointment / doctor-visit history within the same date range,
-      // so the report shows earlier consultations alongside the symptom log
-      // they relate to, not just the raw symptom entries on their own.
-      const apptsRes = await query(
-        `SELECT * FROM appointments
-       WHERE user_id = $1 AND scheduled_at >= $2 AND scheduled_at <= $3
-       ORDER BY scheduled_at DESC`,
-        [req.user.id, start_date, endOfDay]
-      );
-      const appointments = apptsRes.rows;
+      let appointments = [];
+      if (sections.includes('appointments')) {
+        const apptsRes = await query(
+          `SELECT * FROM appointments
+         WHERE user_id = $1 AND scheduled_at >= $2 AND scheduled_at <= $3
+         ORDER BY scheduled_at DESC`,
+          [req.user.id, start_date, endOfDay]
+        );
+        appointments = apptsRes.rows;
+      }
 
-      // 4. Generate PDF
+      // Generate PDF
       const { fileUrl } = await generateDoctorReport({
         user: req.user,
         entries,
@@ -102,11 +119,16 @@ router.post(
         title
       });
 
-      // 4. Save to reports table
+      // REPORT-4: a content checksum, computed once right after the file
+      // is written, so later tampering (or corruption) on disk can be
+      // detected by comparing against this stored value.
+      const uploadsDir = path.join(__dirname, '../../uploads');
+      const checksum = sha256File(path.join(uploadsDir, 'reports', path.basename(fileUrl)));
+
       const insertRes = await query(
-        `INSERT INTO reports (user_id, file_url, title, date_range_start, date_range_end)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [req.user.id, fileUrl, title, start_date || null, end_date || null]
+        `INSERT INTO reports (user_id, file_url, title, date_range_start, date_range_end, sections, checksum)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [req.user.id, fileUrl, title, start_date || null, end_date || null, JSON.stringify(sections), checksum]
       );
 
       let report = insertRes.rows[0];
@@ -132,16 +154,37 @@ router.post(
 );
 
 // GET /api/reports/:id/file - SEC-16: the only way to read a report's PDF
-// bytes. Ownership-checked; there is no static /uploads mount any more.
-router.get('/:id/file', authenticateToken, async (req, res) => {
+// bytes. REPORT-5: permitted for the owning patient, or a physician who
+// has an active (non-cancelled) appointment with that patient -- not any
+// physician, and not a lapsed relationship (same DOCTOR_ACCESS_LOOKBACK_DAYS
+// idea as DOC-12, applied here to report access specifically).
+router.get('/:id/file', authenticatePatientOrDoctor, async (req, res) => {
   try {
-    const reportRes = await query('SELECT * FROM reports WHERE id = $1 AND user_id = $2', [
-      req.params.id,
-      req.user.id
-    ]);
+    const reportRes = await query('SELECT * FROM reports WHERE id = $1', [req.params.id]);
     const report = reportRes.rows[0];
     if (!report) {
       return sendError(res, 404, 'Report not found');
+    }
+
+    if (req.user) {
+      if (report.user_id !== req.user.id) {
+        return sendError(res, 404, 'Report not found');
+      }
+    } else if (req.doctor) {
+      const lookbackCutoff = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
+      const link = await query(
+        `SELECT id FROM appointments
+         WHERE doctor_id = $1 AND user_id = $2 AND status != 'cancelled' AND scheduled_at >= $3
+         LIMIT 1`,
+        [req.doctor.id, report.user_id, lookbackCutoff]
+      );
+      if (link.rows.length === 0) {
+        return sendError(res, 403, 'You do not have an active appointment with this patient', {
+          code: 'NO_ACTIVE_APPOINTMENT_LINK'
+        });
+      }
+    } else {
+      return sendError(res, 401, 'Access token required');
     }
 
     const uploadsDir = path.join(__dirname, '../../uploads');
@@ -149,6 +192,19 @@ router.get('/:id/file', authenticateToken, async (req, res) => {
     const absolutePath = path.join(uploadsDir, 'reports', fileName);
     if (!absolutePath.startsWith(uploadsDir) || !fs.existsSync(absolutePath)) {
       return sendError(res, 404, 'Report file is missing');
+    }
+
+    // REPORT-4: verify the stored checksum still matches before serving.
+    // A mismatch means the file on disk was altered or corrupted after
+    // generation -- that is a hard failure, not something to serve anyway.
+    if (report.checksum) {
+      const currentChecksum = sha256File(absolutePath);
+      if (currentChecksum !== report.checksum) {
+        req.log?.error({ reportId: report.id }, 'report file checksum mismatch -- refusing to serve');
+        return sendError(res, 409, 'This report file has changed since it was generated and cannot be verified.', {
+          code: 'REPORT_CHECKSUM_MISMATCH'
+        });
+      }
     }
 
     res.setHeader('Content-Type', 'application/pdf');
