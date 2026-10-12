@@ -10,14 +10,14 @@ AUTH-8,done,backend/src/routes/authRoutes.js,,manual check: GET and PUT /api/aut
 AUTH-9,done,backend/src/routes/authRoutes.js,,manual check: PUT /api/auth/dark-mode persists across logins
 AUTH-10,done,backend/src/config/env.js,,manual check: start with JWT_SECRET unset/short, confirm process exits 1 with a clear message
 AUTH-11,done,backend/src/middleware/rateLimit.js,,manual check: 11th login attempt in 15 minutes returns 429
-AUTH-12,missing,,,not implemented — password policy on register/change-password
-AUTH-13,missing,,,not implemented — password reset request/token/link
-AUTH-14,missing,,,not implemented — dev SMTP outbox
-AUTH-15,missing,,,not implemented — change-password endpoint
-AUTH-16,missing,,,not implemented — account lock-out after 5 failed attempts/15 min
-AUTH-17,missing,,,not implemented — lock-out auto-expiry
-AUTH-18,missing,,,not implemented — profile time zone field
-AUTH-19,missing,,,not implemented — refresh-token reuse detection
+AUTH-12,done,backend/src/middleware/validate.js,tests/security.test.js,"AUTH-12 password policy" describe block
+AUTH-13,done,backend/src/routes/authRoutes.js; migration 008,,manual check: forgot-password then reset-password with the captured token end to end
+AUTH-14,done,backend/src/services/mailService.js,,manual check: inspect backend/data/mail-outbox.json after forgot-password
+AUTH-15,done,backend/src/routes/authRoutes.js,,manual check: PUT /api/auth/password with wrong then correct current password
+AUTH-16,done,backend/src/routes/authRoutes.js; migration 008,,manual check: 5x wrong password locks the account (423 ACCOUNT_LOCKED)
+AUTH-17,done,backend/src/routes/authRoutes.js,,manual check: reset-password clears locked_until/failed_login_attempts
+AUTH-18,done,backend/src/routes/authRoutes.js; migration 008,tests/security.test.js,"AUTH-18 time zone validation" describe block
+AUTH-19,done,backend/src/routes/authRoutes.js; doctorRoutes.js,,manual check: replay a revoked refresh token, confirm REFRESH_REUSE_DETECTED and that the freshly-rotated token is also dead
 SYM-1,done,backend/src/routes/symptomRoutes.js,,manual check: GET /api/symptoms returns seeded catalogue
 SYM-2,done,backend/src/routes/symptomRoutes.js,,manual check: GET /api/symptoms/autocomplete?q=
 SYM-3,done,backend/src/routes/symptomRoutes.js,,manual check: POST /api/symptoms as admin
@@ -139,18 +139,18 @@ SEC-9,done,backend/src/index.js,,manual check: production error response hides s
 SEC-10,partial,backend/src/routes/entryRoutes.js,,gap: confirm attachment upload size/type limits
 SEC-11,partial,backend/src/routes/caregiverRoutes.js,,gap: same as CARE-3
 SEC-12,done,backend/src/routes/*,,manual check: user A cannot fetch user B's entry by id
-SEC-13,missing,,,not implemented — CSRF protection
-SEC-14,partial,backend/src/index.js; frontend/nginx.conf,,corrected on closer read: nginx.conf already sets X-Frame-Options/X-Content-Type-Options/Referrer-Policy/Permissions-Policy; remaining gap is CSP itself, off by default behind ENABLE_CSP
-SEC-15,missing,,,not implemented — file-signature validation
-SEC-16,missing,,,not implemented — authenticated file-serving endpoint
+SEC-13,done,backend/src/middleware/csrf.js; tokenService.js,tests/security.test.js,"SEC-13 CSRF" describe block; also manually verified for doctor/admin portals
+SEC-14,done,backend/src/index.js; frontend/nginx.conf,,manual check: curl -D- shows Content-Security-Policy header from both the backend (API-1/docs) and nginx (SPA)
+SEC-15,done,backend/src/middleware/upload.js,,manual check: upload a renamed text file (rejected, INVALID_FILE_SIGNATURE) then a genuine PNG (accepted)
+SEC-16,done,backend/src/routes/entryRoutes.js; reportRoutes.js; src/index.js,tests/security.test.js,"SEC-16 no static file serving" describe block; also manually verified cross-patient 404 and byte-identical authenticated download
 SEC-17,done,backend/src/db/seed.js,,manual check: run `npm run seed` with SEED_DEMO unset, confirm only the symptom catalogue is seeded; set SEED_DEMO=true, confirm demo accounts appear
 SEC-18,done,backend/.env.example,,manual check: every var referenced by src/config/env.js and src/index.js has a documented placeholder
 SEC-19,done,backend/src/index.js,,manual check: POST a >1MB JSON body, confirm 413/entity-too-large; multipart routes keep their own larger multer limits
 SEC-20,done,.github/workflows/ci.yml,,CI job `backend`/`frontend` run `npm audit --audit-level=high`; ml-service job runs pip-audit (advisory until Phase 6)
-SEC-21,missing,,,not implemented — ML call timeout/retry
-AUDIT-1,missing,,,not implemented — audit_logs table + auth-event writes
-AUDIT-2,missing,,,not implemented — cross-ownership access writes
-AUDIT-3,missing,,,not implemented — admin-only immutable audit read endpoint
+SEC-21,done,backend/src/services/nlpService.js,,manual check: code review of withRetry wrapping all 3 critical ML calls; existing timeouts (3-4.5s) confirmed already present
+AUDIT-1,done,backend/src/utils/auditLog.js; migration 009,,manual check: GET /api/admin/audit-logs shows login_success/login_failed/logout/account_locked/password_changed/password_reset_* rows from the test session
+AUDIT-2,done,backend/src/routes/doctorRoutes.js; adminRoutes.js,,manual check: doctor appointments fetch and admin appointments fetch both produce audit rows; scope not yet exhaustive (see DECISIONS.md)
+AUDIT-3,done,backend/src/routes/adminRoutes.js,,manual check: GET /api/admin/audit-logs requires authenticateAdmin; no write route exists against audit_logs
 PERF-1,done,backend (interactive routes),,manual check: sub-second response on local/LAN
 PERF-2,done,backend scheduler (node-cron),,manual check: 1-minute tick cadence
 PERF-3,done,frontend/src/pages/Reminders.jsx,,manual check: short-interval in-tab poll
@@ -169,7 +169,7 @@ MAIN-1,done,backend/src/db/migrations,,manual check: migration tracking table
 MAIN-2,done,backend/src/routes/nlpRoutes.js,,manual check: mock/real classifier swap point
 MAIN-3,done,repo structure (3 services),,manual check: each service runs independently
 MAIN-5,partial,SymptomLog_Launch_Guide.docx,,gap: write a dedicated runbook
-MAIN-7,missing,,,not implemented — rollback scripts for 7 existing migrations
+MAIN-7,done,backend/src/db/migrate.js; *.down.sql files,,manual check: `node src/db/migrate.js down 009_audit_logs.sql` then re-running migrate re-applies it; 001_init.sql documented as deliberately irreversible
 PORT-1,done,backend/src/db,,manual check: run against SQLite then PostgreSQL unchanged
 PORT-2,done,docker-compose.yml,,manual check: compose up on Linux/macOS/Windows+Docker Desktop
 CLIN-1,done,frontend disclaimers,,manual check: disclaimer visible on every result

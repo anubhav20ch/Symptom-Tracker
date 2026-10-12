@@ -58,6 +58,14 @@ paths:
     put: { tags: [Auth], summary: "Update the authenticated patient's profile (AUTH-8)" }
   /auth/dark-mode:
     put: { tags: [Auth], summary: 'Toggle the dark-mode preference (AUTH-9)' }
+  /auth/timezone:
+    put: { tags: [Auth], summary: 'Update the profile IANA time zone (AUTH-18)' }
+  /auth/password:
+    put: { tags: [Auth], summary: 'Change password while authenticated, requires current password (AUTH-15)' }
+  /auth/forgot-password:
+    post: { tags: [Auth], summary: 'Request a password reset link via email (AUTH-13, AUTH-14)' }
+  /auth/reset-password:
+    post: { tags: [Auth], summary: 'Consume a password reset token and set a new password (AUTH-13)' }
   /doctor/login:
     post: { tags: [Doctor Portal], summary: 'Physician login, separate token/cookie scope (DOC-2)' }
   /doctor/refresh:
@@ -97,6 +105,8 @@ paths:
     get: { tags: [Admin Portal], summary: 'Current ML training dataset status (ADMIN-6)' }
   /admin/dataset/upload:
     post: { tags: [Admin Portal], summary: 'Upload a replacement labeled dataset and trigger retraining (ADMIN-7, ADMIN-8)' }
+  /admin/audit-logs:
+    get: { tags: [Admin Portal], summary: 'Read-only, paginated audit trail; no write endpoint exists (AUDIT-3)' }
   /symptoms:
     get: { tags: [Symptoms], summary: 'List the symptom catalogue (SYM-1)' }
     post: { tags: [Symptoms], summary: 'Add a symptom to the catalogue (SYM-3)' }

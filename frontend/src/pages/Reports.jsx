@@ -10,7 +10,7 @@ import {
   Printer
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { reportsApi, API_ORIGIN } from '../api/client';
+import { reportsApi, openAuthenticatedFile } from '../api/client';
 
 export default function Reports() {
   const [reports, setReports] = useState([]);
@@ -162,16 +162,15 @@ export default function Reports() {
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{latestReport.title}</div>
               </div>
             </div>
-            <a
-              href={`${API_ORIGIN}${latestReport.file_url}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={() => openAuthenticatedFile(latestReport.download_url)}
               className="btn btn-primary btn-sm"
               style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
             >
               <Download size={16} />
               Download PDF
-            </a>
+            </button>
           </div>
         )}
       </div>
@@ -227,16 +226,15 @@ export default function Reports() {
                   </div>
                 </div>
 
-                <a
-                  href={`${API_ORIGIN}${rep.file_url}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={() => openAuthenticatedFile(rep.download_url)}
                   className="btn btn-secondary btn-sm"
                   style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
                 >
                   <Download size={15} />
                   Download PDF
-                </a>
+                </button>
               </div>
             ))}
           </div>

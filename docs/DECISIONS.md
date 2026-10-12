@@ -20,6 +20,30 @@ The SRS has 233 distinct requirement IDs across v1.0 and v1.1. Rather than a bin
 
 **Decision:** `docs/GAP_ANALYSIS.md` rows cite the exact files inspected and the specific missing piece, so each "Partial" or "Missing" row is independently actionable without re-deriving the audit.
 
+## 2026-10-13 — Phase 1: AUDIT-2 scope is representative, not exhaustive
+
+AUDIT-2 says a physician or administrator accessing a specific patient's data should be logged. The system has many such read paths (every doctor/admin endpoint that touches patient rows). Logging all of them in this phase would mean touching nearly every route file a second time.
+
+**Decision:** implemented AUDIT-2 on the two highest-value, highest-traffic paths — a doctor's own appointment list (one row per patient viewed) and admin's system-wide appointment list (one summary row per request, not per returned row, since that view can return many rows and a per-row log would flood the table for a bulk administrative action). Every other cross-ownership read path is a known, tracked gap rather than a silent one — `docs/GAP_ANALYSIS.md` and `docs/TRACEABILITY.csv` both say so explicitly rather than claiming AUDIT-2 as fully done.
+
+## 2026-10-13 — Phase 1: mail service has a real dev outbox but no wired production transport
+
+AUTH-14 asks for a dev outbox and says production "requires a real SMTP/API provider." No specific provider (SMTP via nodemailer, SendGrid, Postmark, SES, etc.) was named anywhere in the brief or the SRS.
+
+**Decision:** `src/services/mailService.js` fully implements the development path (captures to `backend/data/mail-outbox.json`) and defines the production contract (requires `SMTP_HOST`, throws a clear error otherwise) but does not hard-wire a specific vendor SDK — picking one is a product/infra decision (cost, deliverability, existing vendor relationships) that belongs to whoever actually runs this in production, not to an unprompted dependency choice made here. The seam is intentionally one function (`sendMail`) so wiring in a real provider later is a single, isolated change.
+
+## 2026-10-13 — Phase 1: file downloads changed from `<a href>` to an authenticated blob fetch
+
+SEC-16 requires attachments and reports to be served only through an authenticated, ownership-checked route. The frontend's existing download links were plain `<a href="{static-url}">` tags — a browser anchor navigation cannot carry the `Authorization: Bearer` header the rest of the app uses for auth, so simply pointing the same anchor at the new authenticated route would have silently broken every download (401, every time).
+
+**Decision:** added `openAuthenticatedFile()` to `frontend/src/api/client.js`, which fetches the file through the existing authenticated axios client (`responseType: 'blob'`) and opens it via a `blob:` object URL. Updated the three call sites (`History.jsx` attachment list, `Reports.jsx` latest-report banner and report-history list) from `<a>` to `<button onClick=...>`. This is a minimal, necessary fix to keep downloads working through the security fix, not a start on the Phase 5 frontend redesign.
+
+## 2026-10-13 — Phase 1: CSP is two independent policies, not one
+
+The brief's Phase 1 bullet says "Content-Security-Policy and other headers served by nginx." The backend already had an opt-in CSP via Helmet (off by default). These are not the same protection: the browser only enforces whichever CSP header arrived with the HTML *document* response. The React SPA's document is served by nginx (production) or Vite's dev server (development) — never by the Express backend, which only returns JSON except at `/api/docs` (Swagger UI).
+
+**Decision:** implemented two separate, independently-scoped policies: nginx now sends a CSP tailored to the SPA (`frontend/nginx.conf`), and the backend's own CSP (now on by default rather than opt-in) covers only what it actually serves — its JSON API and `/api/docs`. Both allow `style-src 'unsafe-inline'`: the SPA for React's `style={{...}}` prop (which compiles to inline `style=""` attributes), the backend for Swagger UI's injected styles. Eliminating that allowance needs a nonce-per-render scheme on the frontend, which remains documented future work (consistent with the v1.0 SRS's own note that a fully strict CSP needs a policy "written specifically for this application's current script and style usage").
+
 ## 2026-10-13 — Phase 0: discovered and fixed a real `docker compose up --build` failure
 
 Verifying DEPLOY-11 by actually running `docker compose up --build` (not just trusting the compose file) surfaced a genuine pre-existing bug: neither `backend/` nor `frontend/` had a `.dockerignore`. Both Dockerfiles do `RUN npm ci` followed by `COPY . .` — with no `.dockerignore`, that second `COPY` overwrote the container's freshly-installed `node_modules` (built for Linux inside the container) with the host's Windows-built `node_modules`. The backend then crash-looped on boot with `Error loading shared library .../better_sqlite3.node: Exec format error` — a native-binding architecture mismatch.

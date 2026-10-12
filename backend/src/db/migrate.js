@@ -49,7 +49,7 @@ async function runMigrations() {
 
   const files = fs
     .readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith('.sql'))
+    .filter((f) => f.endsWith('.sql') && !f.endsWith('.down.sql'))
     .sort();
 
   for (const file of files) {
@@ -83,8 +83,47 @@ async function runMigrations() {
   console.log('[MIGRATE] All migrations applied successfully!');
 }
 
+// MAIN-7: every migration ships a <name>.down.sql sibling that reverses it,
+// or is explicitly marked irreversible in a comment at the top of the
+// migration file (and has no .down.sql). This runs that sibling file and
+// removes the tracking row, so a bad migration can actually be rolled back
+// rather than only having a rollback file that was never exercised.
+async function runMigrationDown(version) {
+  if (!version) {
+    throw new Error('Usage: node src/db/migrate.js down <migration-filename>.sql');
+  }
+  const downFile = version.replace(/\.sql$/, '.down.sql');
+  const downPath = path.join(MIGRATIONS_DIR, downFile);
+  if (!fs.existsSync(downPath)) {
+    throw new Error(
+      `No rollback file found at ${downFile}. If ${version} is marked irreversible, ` +
+        'it cannot be rolled back automatically — restore from a backup instead.'
+    );
+  }
+
+  console.log('[MIGRATE] Initializing database...');
+  await initDB();
+  await ensureMigrationsTable();
+  const applied = await getAppliedVersions();
+  if (!applied.has(version)) {
+    console.log(`[MIGRATE] ${version} is not currently applied — nothing to roll back.`);
+    return;
+  }
+
+  console.log(`[MIGRATE] Rolling back migration: ${version} (via ${downFile})`);
+  const sql = fs.readFileSync(downPath, 'utf8');
+  const statements = splitStatements(sql);
+  for (const stmt of statements) {
+    await query(stmt + ';');
+  }
+  await query('DELETE FROM schema_migrations WHERE version = $1', [version]);
+  console.log(`[MIGRATE] Rolled back ${version}.`);
+}
+
 if (require.main === module) {
-  runMigrations()
+  const [command, arg] = process.argv.slice(2);
+  const task = command === 'down' ? runMigrationDown(arg) : runMigrations();
+  task
     .then(() => process.exit(0))
     .catch((err) => {
       console.error('[MIGRATE Failed]:', err);
@@ -92,4 +131,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { runMigrations };
+module.exports = { runMigrations, runMigrationDown };

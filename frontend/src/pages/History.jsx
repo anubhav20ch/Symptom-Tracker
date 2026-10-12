@@ -19,7 +19,7 @@ import {
   Play,
   List
 } from 'lucide-react';
-import { entriesApi, symptomsApi, feedbackApi, API_ORIGIN } from '../api/client';
+import { entriesApi, symptomsApi, feedbackApi, openAuthenticatedFile } from '../api/client';
 import PainJourneySimulator from '../components/PainJourneySimulator';
 
 export default function History() {
@@ -474,18 +474,17 @@ export default function History() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   {selectedEntry.attachments.map((att) => (
-                    <a
+                    <button
                       key={att.id}
-                      href={`${API_ORIGIN}${att.file_url}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      type="button"
+                      onClick={() => openAuthenticatedFile(att.download_url)}
                       className="btn btn-secondary btn-sm"
                       style={{ justifyContent: 'flex-start', gap: '0.5rem' }}
                     >
                       <Paperclip size={16} />
                       <span>{att.file_name}</span>
                       <ExternalLink size={14} style={{ marginLeft: 'auto' }} />
-                    </a>
+                    </button>
                   ))}
                 </div>
               </div>

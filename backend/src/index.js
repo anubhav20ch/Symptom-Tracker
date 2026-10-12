@@ -37,12 +37,36 @@ const { startReminderScheduler } = require('./services/reminderScheduler');
 
 const app = express();
 
-// Security hardening: HTTP security headers (HSTS, X-Frame-Options, X-Content-Type-Options, etc.)
-// CSP is opt-in via ENABLE_CSP once a policy tailored to the frontend's asset
-// origins has been defined, so it doesn't break the SPA by default.
+// SEC-14: HTTP security headers, including a CSP tailored to what this
+// process itself actually serves -- the API's own JSON responses (which
+// need no script/style allowance at all) and the Swagger UI page at
+// /api/docs (which bundles its own same-origin JS but injects inline
+// <style> at runtime, hence style-src 'unsafe-inline'). This is a
+// different, narrower policy than the one the frontend SPA needs, which
+// is set independently by nginx (see frontend/nginx.conf) since nginx --
+// not this process -- is what serves the SPA's HTML document.
+// ENABLE_CSP=false remains available as an escape hatch, not the default.
 app.use(
   helmet({
-    contentSecurityPolicy: process.env.ENABLE_CSP === 'true' ? undefined : false,
+    contentSecurityPolicy:
+      process.env.ENABLE_CSP === 'false'
+        ? false
+        : {
+            directives: {
+              defaultSrc: ["'self'"],
+              scriptSrc: ["'self'"],
+              styleSrc: ["'self'", "'unsafe-inline'"],
+              imgSrc: ["'self'", 'data:'],
+              fontSrc: ["'self'", 'data:'],
+              connectSrc: ["'self'"],
+              objectSrc: ["'none'"],
+              frameAncestors: ["'none'"],
+              // This app isn't served over TLS yet (see docs known
+              // limitations); upgrading subresources to https here would
+              // be premature, not protective.
+              upgradeInsecureRequests: null
+            }
+          },
     crossOriginResourcePolicy: { policy: 'cross-origin' }
   })
 );
@@ -74,12 +98,15 @@ app.use('/api/auth/refresh', authLimiter);
 app.use('/api/admin/login', authLimiter);
 app.use('/api/nlp', nlpLimiter);
 
-// Static uploads directory
+// SEC-16: uploads are never served statically. Every attachment and report
+// file is read only through its authenticated, ownership-checked route
+// (GET /api/entries/:id/attachments/:attachmentId/file and
+// GET /api/reports/:id/file) -- this just ensures the directory exists for
+// multer/pdfkit to write into.
 const uploadsDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-app.use('/uploads', express.static(uploadsDir));
 
 // OpenAPI documentation (API-2)
 const openapiDoc = YAML.load(path.join(__dirname, 'docs/openapi.yaml'));

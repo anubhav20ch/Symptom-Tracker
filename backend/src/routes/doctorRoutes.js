@@ -8,10 +8,15 @@ const {
   generateRefreshToken,
   hashToken,
   DOCTOR_REFRESH_COOKIE_NAME,
-  DOCTOR_REFRESH_COOKIE_OPTIONS
+  DOCTOR_REFRESH_COOKIE_OPTIONS,
+  generateCsrfToken,
+  DOCTOR_CSRF_COOKIE_NAME,
+  DOCTOR_CSRF_COOKIE_OPTIONS
 } = require('../services/tokenService');
 const { parsePagination, paginatedResponse } = require('../utils/pagination');
 const { sendError } = require('../utils/apiError');
+const { verifyCsrf } = require('../middleware/csrf');
+const { recordAudit } = require('../utils/auditLog');
 
 // Physician Portal: doctor accounts are provisioned by the clinic/admin (via
 // seed data today, an admin console later) rather than self-registered, so
@@ -27,6 +32,7 @@ async function issueDoctorSession(res, doctor) {
   );
 
   res.cookie(DOCTOR_REFRESH_COOKIE_NAME, raw, DOCTOR_REFRESH_COOKIE_OPTIONS);
+  res.cookie(DOCTOR_CSRF_COOKIE_NAME, generateCsrfToken(), DOCTOR_CSRF_COOKIE_OPTIONS);
   return accessToken;
 }
 
@@ -61,17 +67,20 @@ router.post('/login', async (req, res) => {
     }
 
     if (docRes.rows.length === 0) {
+      await recordAudit({ actorType: 'doctor', action: 'login_failed', requestId: req.id, metadata: { reason: 'no_such_account' } });
       return sendError(res, 401, 'Invalid email or password');
     }
 
     const doctor = docRes.rows[0];
     const match = await bcrypt.compare(password, doctor.password_hash);
     if (!match) {
+      await recordAudit({ actorType: 'doctor', actorId: doctor.id, action: 'login_failed', requestId: req.id });
       return sendError(res, 401, 'Invalid email or password');
     }
     delete doctor.password_hash;
 
     const token = await issueDoctorSession(res, doctor);
+    await recordAudit({ actorType: 'doctor', actorId: doctor.id, action: 'login_success', requestId: req.id });
     res.json({ message: 'Physician login successful', token, doctor });
   } catch (err) {
     console.error('[Doctor Login Error]:', err);
@@ -80,7 +89,7 @@ router.post('/login', async (req, res) => {
 });
 
 // POST /api/doctor/refresh
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', verifyCsrf(DOCTOR_CSRF_COOKIE_NAME), async (req, res) => {
   try {
     const rawToken = req.cookies?.[DOCTOR_REFRESH_COOKIE_NAME];
     if (!rawToken) {
@@ -94,11 +103,27 @@ router.post('/refresh', async (req, res) => {
     );
 
     const storedToken = tokenRes.rows[0];
-    const isExpired = !storedToken || new Date(storedToken.expires_at) < new Date();
-    const isRevoked = !storedToken || !!storedToken.revoked;
 
-    if (!storedToken || isExpired || isRevoked) {
+    // AUTH-19: same reuse-detection rule as the patient portal.
+    if (storedToken && storedToken.revoked) {
+      await query('UPDATE doctor_refresh_tokens SET revoked = $1 WHERE doctor_id = $2', [1, storedToken.doctor_id]);
+      await recordAudit({
+        actorType: 'doctor',
+        actorId: storedToken.doctor_id,
+        action: 'refresh_token_reuse_detected',
+        requestId: req.id
+      });
       res.clearCookie(DOCTOR_REFRESH_COOKIE_NAME, { path: DOCTOR_REFRESH_COOKIE_OPTIONS.path });
+      res.clearCookie(DOCTOR_CSRF_COOKIE_NAME, { path: DOCTOR_CSRF_COOKIE_OPTIONS.path });
+      return sendError(res, 401, 'This session was already used elsewhere and has been revoked for safety. Please log in again.', {
+        code: 'REFRESH_REUSE_DETECTED'
+      });
+    }
+
+    const isExpired = !storedToken || new Date(storedToken.expires_at) < new Date();
+    if (!storedToken || isExpired) {
+      res.clearCookie(DOCTOR_REFRESH_COOKIE_NAME, { path: DOCTOR_REFRESH_COOKIE_OPTIONS.path });
+      res.clearCookie(DOCTOR_CSRF_COOKIE_NAME, { path: DOCTOR_CSRF_COOKIE_OPTIONS.path });
       return sendError(res, 401, 'Refresh token invalid or expired, please log in again');
     }
 
@@ -122,17 +147,22 @@ router.post('/refresh', async (req, res) => {
 });
 
 // POST /api/doctor/logout
-router.post('/logout', async (req, res) => {
+router.post('/logout', verifyCsrf(DOCTOR_CSRF_COOKIE_NAME), async (req, res) => {
   try {
     const rawToken = req.cookies?.[DOCTOR_REFRESH_COOKIE_NAME];
     if (rawToken) {
       const tokenHash = hashToken(rawToken);
+      const tokenRes = await query('SELECT doctor_id FROM doctor_refresh_tokens WHERE token_hash = $1', [tokenHash]);
       await query('UPDATE doctor_refresh_tokens SET revoked = $1 WHERE token_hash = $2', [
         1,
         tokenHash
       ]);
+      if (tokenRes.rows[0]) {
+        await recordAudit({ actorType: 'doctor', actorId: tokenRes.rows[0].doctor_id, action: 'logout', requestId: req.id });
+      }
     }
     res.clearCookie(DOCTOR_REFRESH_COOKIE_NAME, { path: DOCTOR_REFRESH_COOKIE_OPTIONS.path });
+    res.clearCookie(DOCTOR_CSRF_COOKIE_NAME, { path: DOCTOR_CSRF_COOKIE_OPTIONS.path });
     res.json({ message: 'Logged out successfully' });
   } catch (err) {
     sendError(res, 500, 'Failed to log out');
@@ -184,6 +214,21 @@ router.get('/appointments', authenticateDoctor, async (req, res) => {
        ORDER BY a.scheduled_at DESC
        LIMIT $2 OFFSET $3`,
       [req.doctor.id, limit, offset]
+    );
+    // AUDIT-2: a physician reading patient data, even within their own
+    // authorized appointment list, is exactly the access PRIV-4 (Phase 4)
+    // will show the patient in their own "who accessed my data" log.
+    await Promise.all(
+      result.rows.map((row) =>
+        recordAudit({
+          actorType: 'doctor',
+          actorId: req.doctor.id,
+          action: 'viewed_patient_appointment',
+          targetType: 'user',
+          targetId: row.user_id,
+          requestId: req.id
+        })
+      )
     );
     res.json(paginatedResponse('appointments', result.rows, total, { limit, offset }));
   } catch (err) {

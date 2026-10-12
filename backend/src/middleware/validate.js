@@ -22,19 +22,69 @@ function validateBody(schema) {
   };
 }
 
+// AUTH-12: minimum length 10, at least one letter and one digit. Shared by
+// registration and password change so the two can never drift apart.
+const passwordPolicy = z
+  .string()
+  .min(10, 'Password must be at least 10 characters')
+  .max(200)
+  .regex(/[A-Za-z]/, 'Password must contain at least one letter')
+  .regex(/[0-9]/, 'Password must contain at least one digit');
+
+// AUTH-18: validated by asking the runtime's own ICU time zone database to
+// accept it -- Intl.DateTimeFormat throws for a genuinely invalid zone but,
+// unlike Intl.supportedValuesOf('timeZone'), also accepts legacy aliases
+// the canonical list doesn't enumerate (e.g. "Asia/Kolkata", which some
+// ICU builds only list as "Asia/Calcutta").
+function isValidTimeZone(tz) {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const registerSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(255),
   email: z.string().trim().email('A valid email address is required').max(255),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(200),
+  password: passwordPolicy,
   age: z.coerce.number().int().min(0).max(130).optional().nullable(),
   gender: z.string().max(50).optional().nullable(),
   chronic_conditions: z.any().optional(),
-  user_tier: z.string().max(50).optional()
+  user_tier: z.string().max(50).optional(),
+  timezone: z
+    .string()
+    .max(100)
+    .refine(isValidTimeZone, { message: 'Unrecognized IANA time zone' })
+    .optional()
 });
 
 const loginSchema = z.object({
   email: z.string().trim().email('A valid email address is required'),
   password: z.string().min(1, 'Password is required')
+});
+
+// AUTH-15: change password while authenticated.
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: passwordPolicy
+});
+
+// AUTH-13: request a password reset by email. Always accepted (no
+// enumeration signal either way -- see authRoutes.js forgot-password).
+const forgotPasswordSchema = z.object({
+  email: z.string().trim().email('A valid email address is required')
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Reset token is required'),
+  newPassword: passwordPolicy
+});
+
+// AUTH-18: dedicated endpoint for changing the profile time zone post-registration.
+const timezoneSchema = z.object({
+  timezone: z.string().refine(isValidTimeZone, { message: 'Unrecognized IANA time zone' })
 });
 
 const reminderSchema = z.object({
@@ -68,6 +118,11 @@ module.exports = {
   validateBody,
   registerSchema,
   loginSchema,
+  changePasswordSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  timezoneSchema,
   reminderSchema,
-  reportGenerateSchema
+  reportGenerateSchema,
+  isValidTimeZone
 };

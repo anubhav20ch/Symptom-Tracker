@@ -1,4 +1,7 @@
 -- SymptomLog Database Schema (PostgreSQL & SQLite compatible)
+-- MAIN-7: irreversible. This is the baseline schema for every core table;
+-- a rollback would mean dropping all of them, which is "restore from a
+-- backup," not a migration. No 001_init.down.sql is provided deliberately.
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,

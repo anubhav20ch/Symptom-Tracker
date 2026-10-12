@@ -3,6 +3,26 @@ require('dotenv').config();
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8001';
 
+// SEC-21: every call to the ML microservice already carries an explicit
+// timeout (never hangs a request indefinitely); this adds one retry with a
+// short backoff before giving up to the keyword/rule-based fallback, so a
+// single transient blip doesn't immediately degrade a request that would
+// have succeeded a moment later.
+async function withRetry(fn, { retries = 1, delayMs = 250 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Calls the Python ML/NLP FastAPI microservice to parse free text into symptom details.
  * Falls back gracefully to heuristic keyword parsing if microservice is unreachable.
@@ -22,7 +42,9 @@ async function extractSymptomFromText(text) {
   }
 
   try {
-    const response = await axios.post(`${ML_SERVICE_URL}/extract`, { text }, { timeout: 3000 });
+    const response = await withRetry(() =>
+      axios.post(`${ML_SERVICE_URL}/extract`, { text }, { timeout: 3000 })
+    );
     return response.data;
   } catch (err) {
     console.warn(
@@ -136,14 +158,16 @@ async function smartAnalyzeText(text, userChronicConditions = [], overrides = {}
   }
 
   try {
-    const response = await axios.post(
-      `${ML_SERVICE_URL}/numerical/smart-analyze`,
-      {
-        text,
-        user_chronic_conditions: userChronicConditions,
-        overrides
-      },
-      { timeout: 4500 }
+    const response = await withRetry(() =>
+      axios.post(
+        `${ML_SERVICE_URL}/numerical/smart-analyze`,
+        {
+          text,
+          user_chronic_conditions: userChronicConditions,
+          overrides
+        },
+        { timeout: 4500 }
+      )
     );
     return response.data;
   } catch (err) {
@@ -246,10 +270,8 @@ async function predictDiseaseFromText(text) {
   }
 
   try {
-    const response = await axios.post(
-      `${ML_SERVICE_URL}/predict-disease`,
-      { text },
-      { timeout: 4000 }
+    const response = await withRetry(() =>
+      axios.post(`${ML_SERVICE_URL}/predict-disease`, { text }, { timeout: 4000 })
     );
     return response.data;
   } catch (err) {

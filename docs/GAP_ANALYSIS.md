@@ -2,9 +2,9 @@
 
 Generated 2026-10-13, baseline audit before Phase 0–6 code changes, as required by the completion brief ("Do not change code until this exists"). Updated 2026-10-13 after Phase 0 landed (see docs/DECISIONS.md and the git log for what changed).
 
-**Summary:** 233 requirement IDs assessed — Done: 127, Partial: 11, Missing: 95.
+**Summary:** 233 requirement IDs assessed — Done: 144, Partial: 10, Missing: 79.
 
-Phase 0 (foundations) is complete and verified: env validation, structured logging, the API-1 error envelope, /api/health + /api/ready, OpenAPI docs, pagination, lint/format tooling for all three services, and a CI workflow that builds the full Docker Compose stack and gates on every container reporting healthy — which caught and fixed a real pre-existing boot bug (see DECISIONS.md). Everything still "New in 1.1" and not yet Done belongs to Phases 1–6.
+Phase 0 (foundations) and Phase 1 (security and accounts) are both complete and verified. Phase 0: env validation, structured logging, the API-1 error envelope, /api/health + /api/ready, OpenAPI docs, pagination, lint/format tooling for all three services, and a CI workflow that builds the full Docker Compose stack and gates on every container reporting healthy — which caught and fixed a real pre-existing boot bug (see DECISIONS.md). Phase 1: password policy, reset flow with a dev mail outbox, change-password, account lockout, profile time zone, refresh-token reuse detection (patient + doctor), CSRF on every cookie-driven endpoint (patient/doctor/admin), CSP enabled by default (backend + nginx), upload signature validation, authenticated ownership-checked file serving (the public /uploads mount is gone), an ML-call retry, the audit log, and migration rollback scripts. Everything still "New in 1.1" and not yet Done belongs to Phases 2–6.
 
 | Requirement ID | Status | Files / Location | Notes |
 |---|---|---|---|
@@ -125,26 +125,26 @@ Phase 0 (foundations) is complete and verified: env validation, structured loggi
 | CLIN-1 | Done | frontend disclaimers, triage escalation logic |  |
 | CLIN-2 | Done | frontend disclaimers, triage escalation logic |  |
 | CLIN-3 | Done | frontend disclaimers, triage escalation logic |  |
-| AUTH-12 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
-| AUTH-13 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
-| AUTH-14 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
-| AUTH-15 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
-| AUTH-16 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
-| AUTH-17 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
-| AUTH-18 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
-| AUTH-19 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
-| SEC-13 | Missing | backend/src/index.js | No CSRF middleware found. |
-| SEC-14 | Partial | backend/src/index.js, frontend/nginx.conf | CORRECTED: nginx.conf already sets X-Frame-Options/X-Content-Type-Options/Referrer-Policy/Permissions-Policy. Remaining gap is narrower than first assessed: CSP itself, off by default behind ENABLE_CSP, pending a policy tailored to the SPA (Phase 1). |
-| SEC-15 | Missing | backend/src/routes/entryRoutes.js | No magic-byte/signature validation found, only (at most) extension/MIME checks. |
-| SEC-16 | Missing | frontend/nginx.conf, backend/src/routes | Uploads directory appears to be reachable as static content via nginx/uploads proxy rather than an authenticated serving endpoint — needs verification and likely rework. |
+| AUTH-12 | Done | backend/src/middleware/validate.js (passwordPolicy) | PHASE 1: min 10 chars, letter+digit required, shared by register and change-password. Verified via test + manual curl. |
+| AUTH-13 | Done | backend/src/routes/authRoutes.js (forgot-password, reset-password), migration 008 | PHASE 1: single-use hashed token, 1hr expiry, generic response regardless of account existence. Verified end-to-end via curl + dev outbox. |
+| AUTH-14 | Done | backend/src/services/mailService.js | PHASE 1: dev outbox writes to backend/data/mail-outbox.json; production requires SMTP_HOST and throws rather than silently falling back. |
+| AUTH-15 | Done | backend/src/routes/authRoutes.js (PUT /password) | PHASE 1: requires current password; revokes all other refresh tokens on success. Verified via curl. |
+| AUTH-16 | Done | backend/src/routes/authRoutes.js (login), migration 008 | PHASE 1: 5 failed attempts within a 15-min rolling window locks the account. Verified via curl (5x wrong password). |
+| AUTH-17 | Done | backend/src/routes/authRoutes.js | PHASE 1: 30-min lockout duration; also cleared immediately by a successful password reset. |
+| AUTH-18 | Done | backend/src/routes/authRoutes.js (PUT /timezone), migration 008, middleware/validate.js | PHASE 1: validated via Intl.DateTimeFormat (accepts legacy aliases like Asia/Kolkata that Intl.supportedValuesOf misses). Covered by security.test.js. |
+| AUTH-19 | Done | backend/src/routes/authRoutes.js, doctorRoutes.js (refresh) | PHASE 1: presenting an already-revoked refresh token revokes every token for that account. Verified end-to-end via curl replay for both patient and doctor portals. |
+| SEC-13 | Done | backend/src/middleware/csrf.js, src/services/tokenService.js | PHASE 1: double-submit cookie CSRF on every cookie-driven endpoint (patient/doctor refresh+logout, admin logout). Verified via curl (403 without header, success with it) for all three portals. |
+| SEC-14 | Done | backend/src/index.js, frontend/nginx.conf | PHASE 1: backend CSP now on by default (tailored to its own JSON API + Swagger UI); nginx now also sends a CSP tailored to the SPA (script-src 'self', style-src allows 'unsafe-inline' for React's inline style prop and Google Fonts). Verified headers present via curl; browser-level script-execution behavior not independently verified (no headless browser in this environment). |
+| SEC-15 | Done | backend/src/middleware/upload.js (verifyFileSignature) | PHASE 1: checks magic bytes (JPEG/PNG/GIF/WEBP/PDF) after multer writes the file; deletes and rejects on mismatch. Verified via curl: a renamed text file is rejected, a genuine PNG is accepted. |
+| SEC-16 | Done | backend/src/routes/entryRoutes.js, reportRoutes.js, src/index.js, frontend/nginx.conf | PHASE 1: removed the public static /uploads mount entirely; attachments and reports are now served only via authenticated, ownership-checked routes. Verified: old static path now 404s, unauthenticated request to the new route 401s, a different patient's token 404s, the owning patient gets a byte-identical file. |
 | SEC-17 | Done | backend/src/db/seed.js | PHASE 0: split seed.js into seedSymptomsCatalogue() (always runs, idempotent) and seedDemoAccounts() (only when SEED_DEMO=true). Verified via manual seed run both ways. |
 | SEC-18 | Done | backend/.env.example | PHASE 0: added LOG_LEVEL, SEED_DEMO, ENABLE_CSP entries; every var referenced by config/env.js and index.js is now documented with a placeholder. |
 | SEC-19 | Done | backend/src/index.js | PHASE 0: express.json/urlencoded now capped at 1mb; multipart routes keep their own larger multer limits (SEC-10). |
 | SEC-20 | Done | .github/workflows/ci.yml | PHASE 0: backend and frontend CI jobs run `npm audit --audit-level=high`; ml-service job runs pip-audit advisory until Phase 6 triages findings. |
-| SEC-21 | Missing | backend/src/routes/nlpRoutes.js | No explicit axios timeout/retry-with-backoff found on calls to the ML microservice. |
-| AUDIT-1 | Missing | backend/src/db/migrations | No audit_logs table or related endpoints exist. |
-| AUDIT-2 | Missing | backend/src/db/migrations | No audit_logs table or related endpoints exist. |
-| AUDIT-3 | Missing | backend/src/db/migrations | No audit_logs table or related endpoints exist. |
+| SEC-21 | Done | backend/src/services/nlpService.js (withRetry) | PHASE 1: every ML call already had an explicit timeout (3-4.5s); added one retry with a 250ms backoff before falling back to the keyword/rule-based degradation path. |
+| AUDIT-1 | Done | backend/src/utils/auditLog.js, migration 009 | PHASE 1: login success/failure/lockout, logout, registration, password change, and reset events write an audit_logs row for patient, doctor, and admin. Verified via GET /admin/audit-logs showing real entries from the test session. |
+| AUDIT-2 | Done | backend/src/routes/doctorRoutes.js, adminRoutes.js | PHASE 1: a doctor's appointment list writes one row per patient viewed; admin's system-wide appointment list writes one summary row per request (not per row, to avoid flooding). Scope is intentionally not yet exhaustive across every cross-ownership read in the system -- see docs/DECISIONS.md. |
+| AUDIT-3 | Done | backend/src/routes/adminRoutes.js (GET /audit-logs), migration 009 | PHASE 1: admin-only, paginated, filterable by actor_type/action. No PUT/PATCH/DELETE route exists against audit_logs anywhere -- that omission is how immutability is enforced. Verified via curl. |
 | ENTRY-8 | Missing | backend/src/db/migrations, frontend/src/pages/LogSymptom.jsx | No body-region/body-map field, no onset/resolution fields, no follow-up linkage found in schema or form; server-side validation coverage not fully confirmed. |
 | ENTRY-9 | Missing | backend/src/db/migrations, frontend/src/pages/LogSymptom.jsx | No body-region/body-map field, no onset/resolution fields, no follow-up linkage found in schema or form; server-side validation coverage not fully confirmed. |
 | ENTRY-10 | Missing | backend/src/db/migrations, frontend/src/pages/LogSymptom.jsx | No body-region/body-map field, no onset/resolution fields, no follow-up linkage found in schema or form; server-side validation coverage not fully confirmed. |
@@ -240,12 +240,12 @@ Phase 0 (foundations) is complete and verified: env validation, structured loggi
 | PERF-5 | Done | backend/src/utils/pagination.js | PHASE 0: shared helper defaults every list endpoint to limit=20 (max 50), except /api/reminders (default 200/max 500 — the in-tab alarm poller and background scheduler need to see every active reminder, see DECISIONS.md). Verified via curl on each paginated endpoint. |
 | PERF-7 | Missing | frontend build config, CI | No bundle-size budget or Lighthouse check found. |
 | MAIN-5 | Partial | README.md, SymptomLog_Launch_Guide.docx | A launch guide exists; no dedicated runbook (backup/restore, retraining, rollback, incident steps) confirmed. |
-| MAIN-7 | Missing | backend/src/db/migrations | No rollback/down scripts found for any of the 7 migrations; none are documented as irreversible either. |
+| MAIN-7 | Done | backend/src/db/migrate.js (runMigrationDown), *.down.sql files | PHASE 1: added a rollback runner (`npm run migrate:down -- <file>.sql`) plus .down.sql files for migrations 002-009; 001_init.sql is explicitly documented as irreversible (dropping the baseline schema is 'restore from backup', not a migration) rather than given an unsafe-to-run down script. Verified by rolling 009 back and re-applying it. |
 
 ## Phase sequencing
 
 - **Phase 0 — done**: SEC-7, SEC-17..20, AUTH-10, OBS-1, OBS-2, API-1, API-2, API-3, PERF-5, DEPLOY-11, plus lint/format tooling (ESLint+Prettier for backend, oxlint+Prettier for frontend, Ruff+Black for ml_service) and `.env.example` completeness.
-- **Phase 1** closes: AUTH-12..19, SEC-13, SEC-14 (CSP itself), SEC-15, SEC-16, SEC-21, AUDIT-1..3.
+- **Phase 1 — done**: AUTH-12..19, SEC-13..16, SEC-21, AUDIT-1..3, plus MAIN-7 (migration rollbacks, pulled forward from Phase 6 since the convention needed to exist before more migrations landed).
 - **Phase 2** closes: ENTRY-8..11, TRIAGE-7..10, NLP-8..10 (narrowed: top-3 shape + identifier-exclusion confirmation only, see NLP-10 note).
 - **Phase 3** closes: REM-8..14, APPT-5..9, DOC-9, DOC-12, CARE-4..7, REPORT-3..5.
 - **Phase 4** closes: PRIV-1..6, ADMIN-10..15, CLIN-5.

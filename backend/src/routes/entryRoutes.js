@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
 const { query } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 const { classifySymptomEntry } = require('../services/classificationEngine');
 const upload = require('../middleware/upload');
 const { parsePagination, paginatedResponse } = require('../utils/pagination');
 const { sendError } = require('../utils/apiError');
+
+const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
 // GET /api/entries - List user's entries with rich filters (API-3, PERF-5:
 // bounded, consistently-shaped pagination)
@@ -116,7 +119,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
       'SELECT * FROM attachments WHERE entry_id = $1 ORDER BY uploaded_at ASC',
       [entry.id]
     );
-    entry.attachments = attachRes.rows;
+    entry.attachments = attachRes.rows.map((a) => ({
+      ...a,
+      download_url: `/api/entries/${entry.id}/attachments/${a.id}/file`
+    }));
 
     // Fetch feedback
     const fbRes = await query('SELECT * FROM feedback WHERE entry_id = $1 AND user_id = $2', [
@@ -358,41 +364,92 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 });
 
 // POST /api/entries/:id/attachments - Upload photo/document
-router.post('/:id/attachments', authenticateToken, upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return sendError(res, 400, 'No file uploaded');
-    }
+router.post(
+  '/:id/attachments',
+  authenticateToken,
+  upload.single('file'),
+  upload.verifyFileSignature,
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return sendError(res, 400, 'No file uploaded');
+      }
 
-    // Verify entry belongs to user
-    const check = await query('SELECT id FROM symptom_entries WHERE id = $1 AND user_id = $2', [
-      req.params.id,
-      req.user.id
-    ]);
-    if (check.rows.length === 0) {
-      return sendError(res, 404, 'Symptom entry not found');
-    }
+      // Verify entry belongs to user
+      const check = await query('SELECT id FROM symptom_entries WHERE id = $1 AND user_id = $2', [
+        req.params.id,
+        req.user.id
+      ]);
+      if (check.rows.length === 0) {
+        return sendError(res, 404, 'Symptom entry not found');
+      }
 
-    const fileUrl = `/uploads/${req.file.filename}`;
-    const insertRes = await query(
-      `INSERT INTO attachments (entry_id, file_url, file_name, file_type, size_bytes)
+      const fileUrl = `/uploads/${req.file.filename}`;
+      const insertRes = await query(
+        `INSERT INTO attachments (entry_id, file_url, file_name, file_type, size_bytes)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [req.params.id, fileUrl, req.file.originalname, req.file.mimetype, req.file.size]
-    );
-
-    let created = insertRes.rows[0];
-    if (!created) {
-      const fetchA = await query(
-        'SELECT * FROM attachments WHERE entry_id = $1 ORDER BY id DESC LIMIT 1',
-        [req.params.id]
+        [req.params.id, fileUrl, req.file.originalname, req.file.mimetype, req.file.size]
       );
-      created = fetchA.rows[0];
+
+      let created = insertRes.rows[0];
+      if (!created) {
+        const fetchA = await query(
+          'SELECT * FROM attachments WHERE entry_id = $1 ORDER BY id DESC LIMIT 1',
+          [req.params.id]
+        );
+        created = fetchA.rows[0];
+      }
+
+      res.status(201).json({ message: 'File attached successfully', attachment: created });
+    } catch (err) {
+      console.error('[Attachment upload error]:', err);
+      sendError(res, 500, 'Failed to upload attachment');
+    }
+  }
+);
+
+// GET /api/entries/:id/attachments/:attachmentId/file - SEC-16: the only
+// way to read an attachment's bytes. Ownership is checked through the
+// parent entry, not just the attachment row, so a patient can never read
+// another patient's file even by guessing an attachment id. There is no
+// static /uploads mount any more (see src/index.js) -- this route is it.
+router.get('/:id/attachments/:attachmentId/file', authenticateToken, async (req, res) => {
+  try {
+    const entryCheck = await query(
+      'SELECT id FROM symptom_entries WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (entryCheck.rows.length === 0) {
+      return sendError(res, 404, 'Attachment not found');
     }
 
-    res.status(201).json({ message: 'File attached successfully', attachment: created });
+    const attRes = await query('SELECT * FROM attachments WHERE id = $1 AND entry_id = $2', [
+      req.params.attachmentId,
+      req.params.id
+    ]);
+    const attachment = attRes.rows[0];
+    if (!attachment) {
+      return sendError(res, 404, 'Attachment not found');
+    }
+
+    // file_url is always "/uploads/<name>" (see upload.js); resolve it
+    // against the uploads directory itself so a crafted file_url could
+    // never be used to read a path outside it.
+    const fileName = path.basename(attachment.file_url);
+    const absolutePath = path.join(UPLOADS_DIR, fileName);
+    if (!absolutePath.startsWith(UPLOADS_DIR) || !require('fs').existsSync(absolutePath)) {
+      return sendError(res, 404, 'Attachment file is missing');
+    }
+
+    res.setHeader('Content-Type', attachment.file_type || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(attachment.file_name || fileName)}"`
+    );
+    res.sendFile(absolutePath);
   } catch (err) {
-    console.error('[Attachment upload error]:', err);
-    sendError(res, 500, 'Failed to upload attachment');
+    console.error('[Attachment download error]:', err);
+    sendError(res, 500, 'Failed to retrieve attachment');
   }
 });
 

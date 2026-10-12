@@ -5,6 +5,16 @@ import axios from 'axios';
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 export const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
 
+// SEC-13: the backend's refresh/logout endpoints are double-submit CSRF
+// protected. The server sets a readable (non-HttpOnly) cookie alongside
+// the HttpOnly refresh cookie; this reads it back so it can be echoed in
+// the X-CSRF-Token header, which a cross-site attacker's forged request
+// cannot do on its own.
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true, // sends the HttpOnly refresh-token cookie to /api/auth/*
@@ -13,12 +23,17 @@ const api = axios.create({
   },
 });
 
-// Request interceptor: attach token
+// Request interceptor: attach token, and the CSRF header for the cookie-
+// authenticated refresh/logout endpoints.
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('symptomlog_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    const csrfToken = getCookie('symptomlog_csrf_token');
+    if (csrfToken) {
+      config.headers['X-CSRF-Token'] = csrfToken;
     }
     return config;
   },
@@ -85,6 +100,10 @@ doctorApiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  const csrfToken = getCookie('symptomlog_doctor_csrf_token');
+  if (csrfToken) {
+    config.headers['X-CSRF-Token'] = csrfToken;
+  }
   return config;
 });
 
@@ -131,6 +150,10 @@ export const authApi = {
   me: () => api.get('/auth/me'),
   updateProfile: (data) => api.put('/auth/profile', data),
   toggleDarkMode: (darkMode) => api.put('/auth/dark-mode', { darkMode }),
+  updateTimezone: (timezone) => api.put('/auth/timezone', { timezone }),
+  changePassword: (currentPassword, newPassword) => api.put('/auth/password', { currentPassword, newPassword }),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, newPassword) => api.post('/auth/reset-password', { token, newPassword }),
   logout: () => api.post('/auth/logout'),
 };
 
@@ -230,6 +253,10 @@ adminApiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  const csrfToken = getCookie('symptomlog_admin_csrf_token');
+  if (csrfToken) {
+    config.headers['X-CSRF-Token'] = csrfToken;
+  }
   return config;
 });
 
@@ -258,11 +285,25 @@ export const adminApi = {
   getAppointments: () => adminApiClient.get('/admin/appointments'),
   updateAppointment: (id, data) => adminApiClient.put(`/admin/appointments/${id}`, data),
   getDatasetStatus: () => adminApiClient.get('/admin/dataset/status'),
+  getAuditLogs: (params) => adminApiClient.get('/admin/audit-logs', { params }),
   uploadDataset: (formData) =>
     adminApiClient.post('/admin/dataset/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
 };
+
+// SEC-16: attachments and reports are now served only through authenticated,
+// ownership-checked routes, not a public /uploads mount a plain <a href>
+// could reach. A regular anchor tag can't attach the Bearer token, so this
+// fetches the file through the normal axios client (which does) and opens
+// the result as a blob: URL instead.
+export async function openAuthenticatedFile(path, client = api) {
+  const response = await client.get(path, { responseType: 'blob' });
+  const blobUrl = window.URL.createObjectURL(response.data);
+  window.open(blobUrl, '_blank', 'noopener,noreferrer');
+  // Revoke after giving the new tab a moment to actually load the blob.
+  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 30000);
+}
 
 export const caregiverApi = {
   generateLink: (days_valid) => api.post('/caregiver/generate', { days_valid }),

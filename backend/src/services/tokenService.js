@@ -59,6 +59,28 @@ const ADMIN_REFRESH_COOKIE_OPTIONS = {
   path: '/api/admin'
 };
 
+// SEC-13: double-submit CSRF token. Unlike the refresh token this cookie is
+// deliberately NOT HttpOnly -- the page must be able to read it and echo it
+// back in a header, which is exactly what a cross-site attacker's forged
+// request cannot do. It rides alongside each portal's refresh cookie with
+// the same path scope and lifetime.
+function generateCsrfToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+const CSRF_COOKIE_NAME = 'symptomlog_csrf_token';
+const CSRF_COOKIE_OPTIONS = {
+  httpOnly: false,
+  secure: COOKIE_SECURE,
+  sameSite: COOKIE_SECURE ? 'strict' : 'lax',
+  path: '/api/auth',
+  maxAge: REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000
+};
+const DOCTOR_CSRF_COOKIE_NAME = 'symptomlog_doctor_csrf_token';
+const DOCTOR_CSRF_COOKIE_OPTIONS = { ...CSRF_COOKIE_OPTIONS, path: '/api/doctor' };
+const ADMIN_CSRF_COOKIE_NAME = 'symptomlog_admin_csrf_token';
+const ADMIN_CSRF_COOKIE_OPTIONS = { ...CSRF_COOKIE_OPTIONS, path: '/api/admin' };
+
 module.exports = {
   JWT_SECRET,
   signAccessToken,
@@ -69,5 +91,12 @@ module.exports = {
   DOCTOR_REFRESH_COOKIE_NAME,
   DOCTOR_REFRESH_COOKIE_OPTIONS,
   ADMIN_REFRESH_COOKIE_NAME,
-  ADMIN_REFRESH_COOKIE_OPTIONS
+  ADMIN_REFRESH_COOKIE_OPTIONS,
+  generateCsrfToken,
+  CSRF_COOKIE_NAME,
+  CSRF_COOKIE_OPTIONS,
+  DOCTOR_CSRF_COOKIE_NAME,
+  DOCTOR_CSRF_COOKIE_OPTIONS,
+  ADMIN_CSRF_COOKIE_NAME,
+  ADMIN_CSRF_COOKIE_OPTIONS
 };

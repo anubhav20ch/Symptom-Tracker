@@ -33,10 +33,12 @@ router.get('/', authenticateToken, async (req, res) => {
       [req.user.id, limit, offset]
     );
 
-    const reports = result.rows.filter((r) => {
-      const absolutePath = path.join(__dirname, '../../', r.file_url);
-      return fs.existsSync(absolutePath);
-    });
+    const reports = result.rows
+      .filter((r) => {
+        const absolutePath = path.join(__dirname, '../../', r.file_url);
+        return fs.existsSync(absolutePath);
+      })
+      .map((r) => ({ ...r, download_url: `/api/reports/${r.id}/file` }));
 
     res.json(paginatedResponse('reports', reports, total, { limit, offset }));
   } catch (err) {
@@ -116,10 +118,11 @@ router.post(
         report = fetchR.rows[0];
       }
 
+      report.download_url = `/api/reports/${report.id}/file`;
       res.status(201).json({
         message: 'Doctor-ready PDF report generated successfully',
         report,
-        download_url: fileUrl
+        download_url: report.download_url
       });
     } catch (err) {
       console.error('[Generate report error]:', err);
@@ -127,5 +130,37 @@ router.post(
     }
   }
 );
+
+// GET /api/reports/:id/file - SEC-16: the only way to read a report's PDF
+// bytes. Ownership-checked; there is no static /uploads mount any more.
+router.get('/:id/file', authenticateToken, async (req, res) => {
+  try {
+    const reportRes = await query('SELECT * FROM reports WHERE id = $1 AND user_id = $2', [
+      req.params.id,
+      req.user.id
+    ]);
+    const report = reportRes.rows[0];
+    if (!report) {
+      return sendError(res, 404, 'Report not found');
+    }
+
+    const uploadsDir = path.join(__dirname, '../../uploads');
+    const fileName = path.basename(report.file_url);
+    const absolutePath = path.join(uploadsDir, 'reports', fileName);
+    if (!absolutePath.startsWith(uploadsDir) || !fs.existsSync(absolutePath)) {
+      return sendError(res, 404, 'Report file is missing');
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(report.title || 'report')}.pdf"`
+    );
+    res.sendFile(absolutePath);
+  } catch (err) {
+    console.error('[Report download error]:', err);
+    sendError(res, 500, 'Failed to retrieve report');
+  }
+});
 
 module.exports = router;

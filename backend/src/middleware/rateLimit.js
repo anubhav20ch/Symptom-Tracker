@@ -8,7 +8,8 @@ const authLimiter = rateLimit({
   max: 10, // 10 attempts per IP per window
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many authentication attempts. Please try again in a few minutes.' }
+  // API-1 envelope, matching every other error response.
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many authentication attempts. Please try again in a few minutes.' } }
 });
 
 const nlpLimiter = rateLimit({
@@ -16,7 +17,7 @@ const nlpLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many NLP requests. Please slow down.' }
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many NLP requests. Please slow down.' } }
 });
 
 module.exports = { authLimiter, nlpLimiter };

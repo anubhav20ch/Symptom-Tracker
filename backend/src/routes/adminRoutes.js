@@ -13,9 +13,14 @@ const {
   generateRefreshToken,
   hashToken,
   ADMIN_REFRESH_COOKIE_NAME,
-  ADMIN_REFRESH_COOKIE_OPTIONS
+  ADMIN_REFRESH_COOKIE_OPTIONS,
+  generateCsrfToken,
+  ADMIN_CSRF_COOKIE_NAME,
+  ADMIN_CSRF_COOKIE_OPTIONS
 } = require('../services/tokenService');
 const { parsePagination, paginatedResponse } = require('../utils/pagination');
+const { verifyCsrf } = require('../middleware/csrf');
+const { recordAudit } = require('../utils/auditLog');
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8001';
 const ML_DATA_PATH = path.join(__dirname, '../../../ml_service/data/Symptom2Disease.csv');
@@ -38,6 +43,7 @@ async function issueAdminSession(res, admin) {
   );
 
   res.cookie(ADMIN_REFRESH_COOKIE_NAME, raw, ADMIN_REFRESH_COOKIE_OPTIONS);
+  res.cookie(ADMIN_CSRF_COOKIE_NAME, generateCsrfToken(), ADMIN_CSRF_COOKIE_OPTIONS);
   return accessToken;
 }
 
@@ -72,17 +78,20 @@ router.post('/login', async (req, res) => {
     }
 
     if (adminRes.rows.length === 0) {
+      await recordAudit({ actorType: 'admin', action: 'login_failed', requestId: req.id, metadata: { reason: 'no_such_account' } });
       return sendError(res, 401, 'Invalid admin credentials');
     }
 
     const admin = adminRes.rows[0];
     const match = await bcrypt.compare(password, admin.password_hash);
     if (!match) {
+      await recordAudit({ actorType: 'admin', actorId: admin.id, action: 'login_failed', requestId: req.id });
       return sendError(res, 401, 'Invalid admin credentials');
     }
 
     delete admin.password_hash;
     const token = await issueAdminSession(res, admin);
+    await recordAudit({ actorType: 'admin', actorId: admin.id, action: 'login_success', requestId: req.id });
     res.json({ message: 'Admin authentication successful', token, admin });
   } catch (err) {
     console.error('[Admin Login Error]:', err);
@@ -91,7 +100,7 @@ router.post('/login', async (req, res) => {
 });
 
 // POST /api/admin/logout
-router.post('/logout', authenticateAdmin, async (req, res) => {
+router.post('/logout', authenticateAdmin, verifyCsrf(ADMIN_CSRF_COOKIE_NAME), async (req, res) => {
   try {
     const rawToken = req.cookies[ADMIN_REFRESH_COOKIE_NAME];
     if (rawToken) {
@@ -101,6 +110,8 @@ router.post('/logout', authenticateAdmin, async (req, res) => {
       ]);
     }
     res.clearCookie(ADMIN_REFRESH_COOKIE_NAME, ADMIN_REFRESH_COOKIE_OPTIONS);
+    res.clearCookie(ADMIN_CSRF_COOKIE_NAME, ADMIN_CSRF_COOKIE_OPTIONS);
+    await recordAudit({ actorType: 'admin', actorId: req.admin.id, action: 'logout', requestId: req.id });
     res.json({ message: 'Admin logged out successfully' });
   } catch (err) {
     sendError(res, 500, 'Failed to log out');
@@ -279,6 +290,18 @@ router.get('/appointments', authenticateAdmin, async (req, res) => {
     `,
       [limit, offset]
     );
+    // AUDIT-2: one row per request (not per patient) -- this is a bulk
+    // administrative view, not a per-patient lookup, so it is logged as
+    // such rather than flooding audit_logs with one row per returned
+    // appointment.
+    await recordAudit({
+      actorType: 'admin',
+      actorId: req.admin.id,
+      action: 'viewed_appointments_list',
+      targetType: 'appointments',
+      requestId: req.id,
+      metadata: { count: apptsRes.rows.length, offset }
+    });
     res.json(paginatedResponse('appointments', apptsRes.rows, total, { limit, offset }));
   } catch (err) {
     console.error('[Admin Get Appointments Error]:', err);
@@ -564,6 +587,48 @@ router.post('/dataset/upload', authenticateAdmin, upload.single('dataset'), asyn
   } catch (err) {
     console.error('[Admin Dataset Upload Error]:', err);
     sendError(res, 500, `Dataset processing failed: ${err.message}`);
+  }
+});
+
+// -------------------------------------------------------------
+// AUDIT LOG (AUDIT-3): admin-only, read-only. There is deliberately no
+// PUT/PATCH/DELETE route against audit_logs anywhere in this codebase --
+// that is how "immutable via the API" is enforced.
+// -------------------------------------------------------------
+
+router.get('/audit-logs', authenticateAdmin, async (req, res) => {
+  try {
+    const { limit, offset } = parsePagination(req.query);
+    const { actor_type, action } = req.query;
+
+    let whereSql = '';
+    const params = [];
+    let paramIndex = 1;
+    if (actor_type) {
+      whereSql += ` WHERE actor_type = $${paramIndex++}`;
+      params.push(actor_type);
+    }
+    if (action) {
+      whereSql += `${whereSql ? ' AND' : ' WHERE'} action = $${paramIndex++}`;
+      params.push(action);
+    }
+
+    const countResult = await query(`SELECT COUNT(*) as total FROM audit_logs${whereSql}`, params);
+    const total = parseInt(countResult.rows[0]?.total ?? 0, 10);
+
+    const dataParams = [...params, limit, offset];
+    const logsRes = await query(
+      `SELECT id, actor_type, actor_id, action, target_type, target_id, request_id, metadata, created_at
+       FROM audit_logs${whereSql}
+       ORDER BY created_at DESC
+       LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
+      dataParams
+    );
+
+    res.json(paginatedResponse('logs', logsRes.rows, total, { limit, offset }));
+  } catch (err) {
+    console.error('[Admin Get Audit Logs Error]:', err);
+    sendError(res, 500, 'Failed to fetch audit logs');
   }
 });
 
