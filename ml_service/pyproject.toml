@@ -1,0 +1,18 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = ["data", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+# E501 (line too long) is not enabled: much of this module's existing content
+# is long clinical-guidance strings, and reformatting them is a cosmetic
+# change with no test coverage to catch a mistake, not something this phase
+# should risk. Real issues (unused imports, import order, undefined names,
+# trailing whitespace) are still caught.
+ignore = ["E501"]
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+exclude = '(data/|__pycache__/)'

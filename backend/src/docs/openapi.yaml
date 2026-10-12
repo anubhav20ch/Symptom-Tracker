@@ -1,0 +1,175 @@
+openapi: '3.0.3'
+info:
+  title: SymptomLog Backend API
+  version: '1.1.0'
+  description: >
+    REST API for the SymptomLog platform. Served at /api/docs (API-2). Every
+    error response uses the envelope { error: { code, message, details } }
+    (API-1). Every list endpoint supports ?limit&offset and returns
+    { items, total, limit, offset } (API-3). This document covers every
+    route mounted in src/index.js; request/response bodies are summarized at
+    field-group level rather than fully typed, and will be filled in
+    incrementally as each phase of the SRS v1.1 completion work lands.
+servers:
+  - url: /api
+tags:
+  - name: Auth
+  - name: Doctor Portal
+  - name: Admin Portal
+  - name: Symptoms
+  - name: Entries
+  - name: NLP
+  - name: Reminders
+  - name: Medications
+  - name: Appointments
+  - name: Feedback
+  - name: Reports
+  - name: Insights
+  - name: Caregiver
+  - name: Push
+  - name: System
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Liveness probe (OBS-2)
+      description: Always returns 200 if the process is up. Does not check dependencies.
+      responses:
+        '200': { description: OK }
+  /ready:
+    get:
+      tags: [System]
+      summary: Readiness probe (OBS-2)
+      description: Returns 200 only if the database and ML microservice are reachable.
+      responses:
+        '200': { description: Ready }
+        '503': { description: Not ready }
+  /auth/register:
+    post: { tags: [Auth], summary: 'Register a new patient account (AUTH-1)' }
+  /auth/login:
+    post: { tags: [Auth], summary: 'Patient login, issues access token + refresh cookie (AUTH-3, AUTH-4)' }
+  /auth/refresh:
+    post: { tags: [Auth], summary: 'Rotate the refresh token for a new access token (AUTH-5)' }
+  /auth/logout:
+    post: { tags: [Auth], summary: 'Revoke the current refresh token (AUTH-7)' }
+  /auth/me:
+    get: { tags: [Auth], summary: "Get the authenticated patient's profile (AUTH-8)" }
+  /auth/profile:
+    put: { tags: [Auth], summary: "Update the authenticated patient's profile (AUTH-8)" }
+  /auth/dark-mode:
+    put: { tags: [Auth], summary: 'Toggle the dark-mode preference (AUTH-9)' }
+  /doctor/login:
+    post: { tags: [Doctor Portal], summary: 'Physician login, separate token/cookie scope (DOC-2)' }
+  /doctor/refresh:
+    post: { tags: [Doctor Portal], summary: 'Rotate the physician refresh token (DOC-3)' }
+  /doctor/logout:
+    post: { tags: [Doctor Portal], summary: 'Revoke the physician refresh token (DOC-3)' }
+  /doctor/directory:
+    get: { tags: [Doctor Portal], summary: 'Public physician directory for appointment booking (DOC-4)' }
+  /doctor/me:
+    get: { tags: [Doctor Portal], summary: "Get the authenticated physician's profile (DOC-5)" }
+  /doctor/appointments:
+    get: { tags: [Doctor Portal], summary: 'List appointments booked with this physician (DOC-6)' }
+  /doctor/appointments/{id}/review:
+    patch: { tags: [Doctor Portal], summary: 'Mark a visit completed/cancelled with a clinical note (DOC-7)' }
+  /doctor/appointments/{id}/prescribe:
+    post: { tags: [Doctor Portal], summary: 'Issue a prescription as a linked medication record (DOC-8, DOC-10)' }
+  /doctor/appointments/{id}/prescriptions:
+    get: { tags: [Doctor Portal], summary: 'List prescriptions issued for an appointment (DOC-8)' }
+  /admin/login:
+    post: { tags: [Admin Portal], summary: 'Administrator login (ADMIN-1)' }
+  /admin/logout:
+    post: { tags: [Admin Portal], summary: 'Revoke the administrator refresh token' }
+  /admin/me:
+    get: { tags: [Admin Portal], summary: "Get the authenticated administrator's profile" }
+  /admin/stats:
+    get: { tags: [Admin Portal], summary: 'System-wide statistics dashboard (ADMIN-3)' }
+  /admin/doctors:
+    get: { tags: [Admin Portal], summary: 'List physician accounts (ADMIN-4)' }
+    post: { tags: [Admin Portal], summary: 'Create a physician account (ADMIN-4)' }
+  /admin/doctors/{id}:
+    delete: { tags: [Admin Portal], summary: 'Remove a physician account with referential cleanup (ADMIN-4)' }
+  /admin/appointments:
+    get: { tags: [Admin Portal], summary: 'List every booked appointment system-wide (ADMIN-5)' }
+  /admin/appointments/{id}:
+    put: { tags: [Admin Portal], summary: 'Reassign/update any appointment (ADMIN-5)' }
+  /admin/dataset/status:
+    get: { tags: [Admin Portal], summary: 'Current ML training dataset status (ADMIN-6)' }
+  /admin/dataset/upload:
+    post: { tags: [Admin Portal], summary: 'Upload a replacement labeled dataset and trigger retraining (ADMIN-7, ADMIN-8)' }
+  /symptoms:
+    get: { tags: [Symptoms], summary: 'List the symptom catalogue (SYM-1)' }
+    post: { tags: [Symptoms], summary: 'Add a symptom to the catalogue (SYM-3)' }
+  /symptoms/autocomplete:
+    get: { tags: [Symptoms], summary: 'Autocomplete search over the catalogue (SYM-2)' }
+  /entries:
+    get:
+      { tags: [Entries], summary: "List the patient's own symptom entries, filterable (ENTRY-4)" }
+    post: { tags: [Entries], summary: 'Create a symptom entry; auto-classified on creation (ENTRY-1, ENTRY-6)' }
+  /entries/{id}:
+    get: { tags: [Entries], summary: 'Get a single symptom entry (ENTRY-5)' }
+    put: { tags: [Entries], summary: 'Update a symptom entry (ENTRY-5)' }
+    delete: { tags: [Entries], summary: 'Delete a symptom entry (ENTRY-5)' }
+  /entries/{id}/attachments:
+    post: { tags: [Entries], summary: 'Attach a file to a symptom entry (ENTRY-3)' }
+  /nlp/smart-analyze:
+    post: { tags: [NLP], summary: 'Combined extraction + numerical biomarker analysis (NLP-2)' }
+  /nlp/numerical-stats:
+    get: { tags: [NLP], summary: 'Statistics describing the numerical biomarker model' }
+  /nlp/extract:
+    post: { tags: [NLP], summary: 'Extract symptom attributes from free text (NLP-1)' }
+  /nlp/predict-disease:
+    post: { tags: [NLP], summary: 'Predict the most likely condition from free text (NLP-3)' }
+  /nlp/diseases:
+    get: { tags: [NLP], summary: 'List the 24 recognized conditions (NLP-4)' }
+  /reminders:
+    get: { tags: [Reminders], summary: "List the patient's reminders (REM-1)" }
+    post: { tags: [Reminders], summary: 'Create a reminder (REM-1)' }
+  /reminders/{id}:
+    put: { tags: [Reminders], summary: 'Update a reminder (REM-1)' }
+    delete: { tags: [Reminders], summary: 'Delete a reminder (REM-1)' }
+  /reminders/{id}/toggle:
+    patch: { tags: [Reminders], summary: 'Enable/disable a reminder (REM-1)' }
+  /reminders/{id}/dose:
+    post: { tags: [Reminders], summary: 'Log a taken/skipped dose (REM-5)' }
+  /reminders/{id}/dose/{date}:
+    delete: { tags: [Reminders], summary: 'Delete a dose-log entry for a date (REM-6)' }
+  /reminders/doses:
+    get: { tags: [Reminders], summary: 'Get dose-adherence history (REM-6)' }
+  /medications:
+    get: { tags: [Medications], summary: "List the patient's medications (MED-1)" }
+    post: { tags: [Medications], summary: 'Add a medication (MED-1)' }
+  /medications/{id}:
+    put: { tags: [Medications], summary: 'Update a medication (MED-1)' }
+    delete: { tags: [Medications], summary: 'Delete a medication (MED-1)' }
+  /medications/{id}/toggle:
+    patch: { tags: [Medications], summary: 'Enable/disable a medication (MED-3)' }
+  /appointments:
+    get: { tags: [Appointments], summary: "List the patient's appointments (APPT-3)" }
+    post: { tags: [Appointments], summary: 'Book an appointment against the physician directory (APPT-1)' }
+  /appointments/{id}:
+    put: { tags: [Appointments], summary: 'Update an appointment (APPT-3)' }
+    delete: { tags: [Appointments], summary: 'Cancel an appointment (APPT-3)' }
+  /appointments/{id}/status:
+    patch: { tags: [Appointments], summary: 'Update appointment status (APPT-4)' }
+  /feedback:
+    post: { tags: [Feedback], summary: 'Rate a classification helpful/not-helpful (NLP-6)' }
+  /feedback/stats:
+    get: { tags: [Feedback], summary: 'Aggregate feedback statistics (NLP-7)' }
+  /reports:
+    get: { tags: [Reports], summary: 'List previously generated reports (REPORT-2)' }
+  /reports/generate:
+    post:
+      { tags: [Reports], summary: 'Generate a PDF clinical summary for a date range (REPORT-1)' }
+  /insights:
+    get: { tags: [Insights], summary: 'Aggregated symptom-pattern summary (INSIGHTS-1)' }
+  /caregiver/generate:
+    post: { tags: [Caregiver], summary: 'Generate a time-limited caregiver share link (CARE-1)' }
+  /caregiver/view/{token}:
+    get: { tags: [Caregiver], summary: 'View a shared summary by token, no auth required (CARE-2)' }
+  /push/vapid-public-key:
+    get: { tags: [Push], summary: 'Get the VAPID public key for push registration (REM-7)' }
+  /push/subscribe:
+    post: { tags: [Push], summary: 'Register a browser for background push alarms (REM-7)' }
+  /push/unsubscribe:
+    post: { tags: [Push], summary: 'Unregister a browser from push alarms (REM-7)' }

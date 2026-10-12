@@ -8,7 +8,7 @@ AUTH-6,done,backend/src/db/migrations/002_refresh_tokens.sql,,manual check: refr
 AUTH-7,done,backend/src/routes/authRoutes.js,,manual check: POST /api/auth/logout revokes the current refresh token
 AUTH-8,done,backend/src/routes/authRoutes.js,,manual check: GET and PUT /api/auth/me /profile round-trip
 AUTH-9,done,backend/src/routes/authRoutes.js,,manual check: PUT /api/auth/dark-mode persists across logins
-AUTH-10,partial,backend/src/index.js,,gap: add and test a startup assertion that the process exits if JWT_SECRET is missing/short
+AUTH-10,done,backend/src/config/env.js,,manual check: start with JWT_SECRET unset/short, confirm process exits 1 with a clear message
 AUTH-11,done,backend/src/middleware/rateLimit.js,,manual check: 11th login attempt in 15 minutes returns 429
 AUTH-12,missing,,,not implemented — password policy on register/change-password
 AUTH-13,missing,,,not implemented — password reset request/token/link
@@ -41,7 +41,7 @@ NLP-6,done,backend/src/routes/feedbackRoutes.js,,manual check: POST /api/feedbac
 NLP-7,done,backend/src/routes/feedbackRoutes.js,,manual check: GET /api/feedback/stats
 NLP-8,missing,,,not implemented — model version stored with prediction
 NLP-9,missing,,,not implemented — low-confidence UI handling
-NLP-10,missing,,,not implemented — top-3 candidates; identifier-exclusion not verified
+NLP-10,partial,ml_service/main.py (predict-disease),,corrected on closer read: response already includes primary + 3 alternative_diseases (top-4 shape); gap is identifier-exclusion confirmation and conforming the shape to a flat top-3 list
 TRIAGE-1,done,backend triage logic,,manual check: entries land in exactly one of 4 tiers
 TRIAGE-2,done,backend triage logic,,manual check: chest pain severity 7 -> Urgent tier
 TRIAGE-3,done,backend triage logic,,manual check: 90+ day duration -> Chronic tier
@@ -133,20 +133,20 @@ SEC-3,done,backend/src (parameterized queries throughout),,manual check: code re
 SEC-4,done,backend/src/index.js (helmet),,manual check: response headers include helmet defaults
 SEC-5,done,backend/src/index.js (CORS allowlist),,manual check: disallowed origin is rejected
 SEC-6,done,backend/src/middleware/rateLimit.js,,manual check: 429 after 10 attempts/15 min
-SEC-7,partial,backend/src/index.js,,gap: same as AUTH-10
+SEC-7,done,backend/src/config/env.js,,same verification as AUTH-10
 SEC-8,partial,backend/src/routes/authRoutes.js,,gap: confirm zod coverage on every listed route
 SEC-9,done,backend/src/index.js,,manual check: production error response hides stack trace
 SEC-10,partial,backend/src/routes/entryRoutes.js,,gap: confirm attachment upload size/type limits
 SEC-11,partial,backend/src/routes/caregiverRoutes.js,,gap: same as CARE-3
 SEC-12,done,backend/src/routes/*,,manual check: user A cannot fetch user B's entry by id
 SEC-13,missing,,,not implemented — CSRF protection
-SEC-14,partial,backend/src/index.js; frontend/nginx.conf,,gap: enable CSP by default + add nginx security headers
+SEC-14,partial,backend/src/index.js; frontend/nginx.conf,,corrected on closer read: nginx.conf already sets X-Frame-Options/X-Content-Type-Options/Referrer-Policy/Permissions-Policy; remaining gap is CSP itself, off by default behind ENABLE_CSP
 SEC-15,missing,,,not implemented — file-signature validation
 SEC-16,missing,,,not implemented — authenticated file-serving endpoint
-SEC-17,missing,,,not implemented — SEED_DEMO gate
-SEC-18,partial,backend/.env.example,,gap: add v1.1 variables as placeholders
-SEC-19,partial,backend/src/index.js,,gap: general JSON body-size limit
-SEC-20,missing,,,not implemented — CI dependency audit
+SEC-17,done,backend/src/db/seed.js,,manual check: run `npm run seed` with SEED_DEMO unset, confirm only the symptom catalogue is seeded; set SEED_DEMO=true, confirm demo accounts appear
+SEC-18,done,backend/.env.example,,manual check: every var referenced by src/config/env.js and src/index.js has a documented placeholder
+SEC-19,done,backend/src/index.js,,manual check: POST a >1MB JSON body, confirm 413/entity-too-large; multipart routes keep their own larger multer limits
+SEC-20,done,.github/workflows/ci.yml,,CI job `backend`/`frontend` run `npm audit --audit-level=high`; ml-service job runs pip-audit (advisory until Phase 6)
 SEC-21,missing,,,not implemented — ML call timeout/retry
 AUDIT-1,missing,,,not implemented — audit_logs table + auth-event writes
 AUDIT-2,missing,,,not implemented — cross-ownership access writes
@@ -155,7 +155,7 @@ PERF-1,done,backend (interactive routes),,manual check: sub-second response on l
 PERF-2,done,backend scheduler (node-cron),,manual check: 1-minute tick cadence
 PERF-3,done,frontend/src/pages/Reminders.jsx,,manual check: short-interval in-tab poll
 PERF-4,done,SymptomLog_Project_Report.docx (model metrics),,manual check: re-run holdout evaluation
-PERF-5,partial,backend/src/routes/entryRoutes.js etc.,,gap: confirm default page size on every list endpoint
+PERF-5,done,backend/src/utils/pagination.js + all list routes,,manual check: call each list endpoint with no query params, confirm limit defaults to 20 (200 for /reminders, documented exception) and caps at 50/500
 PERF-7,missing,,,not implemented — bundle-size budget + Lighthouse CI
 REL-1,done,backend/src/routes/nlpRoutes.js (fallback),,manual check: stop ml_service, confirm fallback
 REL-2,done,backend/src/routes/reminderRoutes.js; migration 006,,manual check: dose_logs persists across cleared browser storage
@@ -177,11 +177,11 @@ CLIN-2,done,backend triage logic,,manual check: red-flag bypasses home-care advi
 CLIN-3,done,frontend disclaimers,,manual check: emergency-services wording present
 CLIN-4,partial,frontend copy,,gap: audit every predictive string for hedged phrasing
 CLIN-5,missing,,,not implemented — static dated self-care content with review label
-API-1,missing,,,not implemented — consistent error envelope
-API-2,missing,,,not implemented — OpenAPI docs at /api/docs
-API-3,partial,backend/src/routes/entryRoutes.js etc.,,gap: pagination on remaining list endpoints
-OBS-1,partial,backend/src/index.js,,gap: structured JSON logs with request id, no health content
-OBS-2,missing,,,not implemented — distinct /api/health and /api/ready
+API-1,done,backend/src/utils/apiError.js + src/middleware/errorHandler.js,,manual check: every error response (404, validation, auth failure, 500) returns { error: { code, message } }; 130/137 pre-existing call sites migrated via codemod, remainder by hand
+API-2,done,backend/src/docs/openapi.yaml + src/index.js,,manual check: GET /api/docs renders Swagger UI listing all 60 documented paths
+API-3,done,backend/src/utils/pagination.js + entries/medications/appointments/reminders/reports/doctor-appointments/admin-doctors/admin-appointments routes,,manual check: same as PERF-5; symptoms catalogue and doctor directory deliberately left unpaginated (bounded reference lists, see DECISIONS.md)
+OBS-1,done,backend/src/utils/logger.js + src/middleware/requestLogger.js,,manual check: tail server output, confirm JSON lines with a request id and no body/health content; redaction list covers password/token/description/freeText/notes fields
+OBS-2,done,backend/src/index.js (/api/health, /api/ready),,manual check: /api/health always 200; /api/ready 503 when ML service or DB unreachable, 200 when both up
 DEPLOY-1,done,backend (native run against SQLite),,manual check: run without Docker
 DEPLOY-2,done,docker-compose.yml,,manual check: docker compose up --build
 DEPLOY-3,done,docker-compose.yml healthchecks,,manual check: dependent service gated on health
@@ -189,7 +189,7 @@ DEPLOY-4,done,backend/Dockerfile; frontend/Dockerfile,,manual check: containers 
 DEPLOY-5,done,docker-compose.yml volumes,,manual check: restart container, data persists
 DEPLOY-6,done,frontend/Dockerfile; nginx.conf,,manual check: VITE_API_URL build arg
 DEPLOY-7,done,backend/src/db/migrate.js,,manual check: re-run migrate, only new files applied
-DEPLOY-11,missing,,,not implemented — CI container health-check gate
+DEPLOY-11,done,.github/workflows/ci.yml; backend/.dockerignore; frontend/.dockerignore; ml_service/.dockerignore,,verified locally: docker compose up --build now brings all 3 services to (healthy) — this run uncovered and fixed a real pre-existing bug (see DECISIONS.md) where missing .dockerignore files let host node_modules overwrite container-built native bindings
 UI-1,done,frontend/src/App.jsx; pages/*,,manual check: every listed page renders
 UI-2,done,frontend/src/App.jsx (protected routes),,manual check: unauthenticated redirect to login
 UI-3,done,frontend nav bar; theme toggle,,manual check: nav links every page

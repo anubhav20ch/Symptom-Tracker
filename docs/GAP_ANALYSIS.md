@@ -1,10 +1,10 @@
 # SymptomLog — Gap Analysis (SRS v1.1)
 
-Generated 2026-10-13, prior to any Phase 0–6 code changes, as required by the completion brief ("Do not change code until this exists").
+Generated 2026-10-13, baseline audit before Phase 0–6 code changes, as required by the completion brief ("Do not change code until this exists"). Updated 2026-10-13 after Phase 0 landed (see docs/DECISIONS.md and the git log for what changed).
 
-**Summary:** 233 requirement IDs assessed — Done: 114, Partial: 17, Missing: 102.
+**Summary:** 233 requirement IDs assessed — Done: 127, Partial: 11, Missing: 95.
 
-Most "New in 1.1" IDs (Section 10 of the SRS) are Missing, as anticipated by the brief. Carried-forward v1.0 IDs are mostly Done, with a handful of Partial findings (CSP default-off, upload limits not universal, some validation coverage unconfirmed) that are folded into the matching v1.1 security requirement rather than tracked twice.
+Phase 0 (foundations) is complete and verified: env validation, structured logging, the API-1 error envelope, /api/health + /api/ready, OpenAPI docs, pagination, lint/format tooling for all three services, and a CI workflow that builds the full Docker Compose stack and gates on every container reporting healthy — which caught and fixed a real pre-existing boot bug (see DECISIONS.md). Everything still "New in 1.1" and not yet Done belongs to Phases 1–6.
 
 | Requirement ID | Status | Files / Location | Notes |
 |---|---|---|---|
@@ -17,7 +17,7 @@ Most "New in 1.1" IDs (Section 10 of the SRS) are Missing, as anticipated by the
 | AUTH-7 | Done | backend/src/routes/authRoutes.js, backend/src/db/migrations/001_init.sql, 002_refresh_tokens.sql | Register/login/refresh/logout/profile/dark-mode all present with bcrypt + rotating refresh cookie. |
 | AUTH-8 | Done | backend/src/routes/authRoutes.js, backend/src/db/migrations/001_init.sql, 002_refresh_tokens.sql | Register/login/refresh/logout/profile/dark-mode all present with bcrypt + rotating refresh cookie. |
 | AUTH-9 | Done | backend/src/routes/authRoutes.js, backend/src/db/migrations/001_init.sql, 002_refresh_tokens.sql | Register/login/refresh/logout/profile/dark-mode all present with bcrypt + rotating refresh cookie. |
-| AUTH-10 | Partial | backend/src/index.js | JWT_SECRET is required in .env.example but no verified startup assertion that the server refuses to boot on a missing/weak secret — needs an explicit check. |
+| AUTH-10 | Done | backend/src/config/env.js | PHASE 0: added validateEnv(); server now exits 1 with a clear message if JWT_SECRET is missing, too short, or still the .env.example placeholder. Verified by manual start. |
 | AUTH-11 | Done | backend/src/middleware/rateLimit.js | authLimiter applied to login/register/refresh. |
 | SYM-1 | Done | backend/src/routes/symptomRoutes.js | Catalogue + autocomplete + create present. |
 | SYM-2 | Done | backend/src/routes/symptomRoutes.js | Catalogue + autocomplete + create present. |
@@ -93,7 +93,7 @@ Most "New in 1.1" IDs (Section 10 of the SRS) are Missing, as anticipated by the
 | SEC-5 | Done | backend/src/index.js, middleware/rateLimit.js | bcrypt, rotating cookie refresh, parameterized queries, helmet, CORS allowlist, rate limiting, generic prod error responses. |
 | SEC-6 | Done | backend/src/index.js, middleware/rateLimit.js | bcrypt, rotating cookie refresh, parameterized queries, helmet, CORS allowlist, rate limiting, generic prod error responses. |
 | SEC-9 | Done | backend/src/index.js, middleware/rateLimit.js | bcrypt, rotating cookie refresh, parameterized queries, helmet, CORS allowlist, rate limiting, generic prod error responses. |
-| SEC-7 | Partial | backend/src/index.js | See AUTH-10 — needs an explicit startup assertion, not just documentation in .env.example. |
+| SEC-7 | Done | backend/src/config/env.js | PHASE 0: same fix as AUTH-10. |
 | SEC-8 | Partial | backend/src/routes/authRoutes.js | Zod validation present on some routes; coverage of every listed route (esp. reminders) not fully re-verified this pass. |
 | SEC-10 | Partial | backend/src/routes/entryRoutes.js, adminRoutes.js | Multer size limit confirmed only on admin dataset upload (25MB); attachment upload limits/content-type checks not confirmed. |
 | SEC-11 | Partial | backend/src/routes/caregiverRoutes.js | See CARE-3. |
@@ -134,13 +134,13 @@ Most "New in 1.1" IDs (Section 10 of the SRS) are Missing, as anticipated by the
 | AUTH-18 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
 | AUTH-19 | Missing | backend/src/routes/authRoutes.js | No password policy enforcement, no reset flow/outbox, no change-password endpoint, no lock-out, no profile time zone, no refresh-reuse detection found. |
 | SEC-13 | Missing | backend/src/index.js | No CSRF middleware found. |
-| SEC-14 | Partial | backend/src/index.js, frontend/nginx.conf | Helmet is present but contentSecurityPolicy is explicitly disabled unless ENABLE_CSP=true; nginx.conf does not set CSP/X-Frame-Options/Referrer-Policy independently. |
+| SEC-14 | Partial | backend/src/index.js, frontend/nginx.conf | CORRECTED: nginx.conf already sets X-Frame-Options/X-Content-Type-Options/Referrer-Policy/Permissions-Policy. Remaining gap is narrower than first assessed: CSP itself, off by default behind ENABLE_CSP, pending a policy tailored to the SPA (Phase 1). |
 | SEC-15 | Missing | backend/src/routes/entryRoutes.js | No magic-byte/signature validation found, only (at most) extension/MIME checks. |
 | SEC-16 | Missing | frontend/nginx.conf, backend/src/routes | Uploads directory appears to be reachable as static content via nginx/uploads proxy rather than an authenticated serving endpoint — needs verification and likely rework. |
-| SEC-17 | Missing | backend/src/db/seed.js | Seed script existence confirmed in v1.0 but gating on SEED_DEMO env var not confirmed — needs explicit guard. |
-| SEC-18 | Partial | backend/.env.example | Example file exists and uses placeholders correctly; needs the new v1.1 variables (SEED_DEMO, SMTP_*, model-lifecycle thresholds) added. |
-| SEC-19 | Partial | backend/src/index.js, routes/adminRoutes.js | Only the admin dataset-upload route has an explicit size limit (25MB); no general JSON body-size limit confirmed at the app level. |
-| SEC-20 | Missing | .github/workflows | No CI workflow exists at all yet. |
+| SEC-17 | Done | backend/src/db/seed.js | PHASE 0: split seed.js into seedSymptomsCatalogue() (always runs, idempotent) and seedDemoAccounts() (only when SEED_DEMO=true). Verified via manual seed run both ways. |
+| SEC-18 | Done | backend/.env.example | PHASE 0: added LOG_LEVEL, SEED_DEMO, ENABLE_CSP entries; every var referenced by config/env.js and index.js is now documented with a placeholder. |
+| SEC-19 | Done | backend/src/index.js | PHASE 0: express.json/urlencoded now capped at 1mb; multipart routes keep their own larger multer limits (SEC-10). |
+| SEC-20 | Done | .github/workflows/ci.yml | PHASE 0: backend and frontend CI jobs run `npm audit --audit-level=high`; ml-service job runs pip-audit advisory until Phase 6 triages findings. |
 | SEC-21 | Missing | backend/src/routes/nlpRoutes.js | No explicit axios timeout/retry-with-backoff found on calls to the ML microservice. |
 | AUDIT-1 | Missing | backend/src/db/migrations | No audit_logs table or related endpoints exist. |
 | AUDIT-2 | Missing | backend/src/db/migrations | No audit_logs table or related endpoints exist. |
@@ -155,7 +155,7 @@ Most "New in 1.1" IDs (Section 10 of the SRS) are Missing, as anticipated by the
 | TRIAGE-10 | Partial | frontend result display | Urgent tier messaging exists per v1.0 report; a dedicated always-shown emergency notice component not confirmed. |
 | NLP-8 | Missing | ml_service/main.py, backend/src/routes/nlpRoutes.js | No model-version field returned or stored with predictions. |
 | NLP-9 | Missing | frontend result screen | No low-confidence UI handling found. |
-| NLP-10 | Missing | ml_service/main.py | predict-disease appears to return a single top prediction, not top-3; no explicit confirmation that patient identifiers are excluded from the payload (needs a code-level check-and-enforce pass). |
+| NLP-10 | Partial | ml_service/main.py | CORRECTED: /predict-disease already returns a primary prediction plus 3 alternative_diseases (top-4 shape), close to the top-3 requirement already. Remaining gap: conform the response shape and confirm no patient identifier is ever sent to the ML service (Phase 2). |
 | REM-8 | Missing | backend/src/routes/reminderRoutes.js, scheduler | No user time zone field to schedule against; idempotent-dispatch, missed-dose auto-marking, adherence percentage computation, push-subscription cleanup, and lock-screen-safe text not confirmed as implemented. |
 | REM-9 | Missing | backend/src/routes/reminderRoutes.js, scheduler | No user time zone field to schedule against; idempotent-dispatch, missed-dose auto-marking, adherence percentage computation, push-subscription cleanup, and lock-screen-safe text not confirmed as implemented. |
 | REM-10 | Missing | backend/src/routes/reminderRoutes.js, scheduler | No user time zone field to schedule against; idempotent-dispatch, missed-dose auto-marking, adherence percentage computation, push-subscription cleanup, and lock-screen-safe text not confirmed as implemented. |
@@ -191,12 +191,12 @@ Most "New in 1.1" IDs (Section 10 of the SRS) are Missing, as anticipated by the
 | ADMIN-13 | Missing | backend/src/routes/adminRoutes.js, ml_service/main.py | No audit-log viewer, class-balance stats, async retraining job, metrics gating, rollback, or version-history endpoints found; current /retrain is synchronous. |
 | ADMIN-14 | Missing | backend/src/routes/adminRoutes.js, ml_service/main.py | No audit-log viewer, class-balance stats, async retraining job, metrics gating, rollback, or version-history endpoints found; current /retrain is synchronous. |
 | ADMIN-15 | Missing | backend/src/routes/adminRoutes.js, ml_service/main.py | No audit-log viewer, class-balance stats, async retraining job, metrics gating, rollback, or version-history endpoints found; current /retrain is synchronous. |
-| API-1 | Missing | backend/src | No consistent error envelope confirmed across routes; no OpenAPI/Swagger route found. |
-| API-2 | Missing | backend/src | No consistent error envelope confirmed across routes; no OpenAPI/Swagger route found. |
-| API-3 | Partial | backend/src/routes/entryRoutes.js, reminderRoutes.js, reportRoutes.js, adminRoutes.js | Pagination (limit/offset) exists on 4 route files; not confirmed on symptoms, medications, appointments, feedback, doctors, caregiver lists. |
-| OBS-2 | Missing | backend/src/index.js | Only a generic health check style endpoint implied by docker-compose; a distinct /api/ready that checks DB+ML connectivity is not confirmed. |
-| OBS-1 | Partial | backend/src/index.js | morgan('dev') text logging is present; not structured JSON, and no request-id correlation confirmed. |
-| DEPLOY-11 | Missing | .github/workflows | No CI workflow exists. |
+| API-1 | Done | backend/src/utils/apiError.js, backend/src/middleware/errorHandler.js | PHASE 0: 130/137 existing error responses migrated via codemod to { error: { code, message } }; remaining 7 (template literals + validate.js) fixed by hand. Verified by curl against bad-login, admin-login, and validation-failure paths. |
+| API-2 | Done | backend/src/docs/openapi.yaml | PHASE 0: OpenAPI 3.0 document covering all 60 mounted paths, served via swagger-ui-express at /api/docs. Verified: GET /api/docs returns 200 and renders. |
+| API-3 | Done | backend/src/utils/pagination.js | PHASE 0: added shared parsePagination/paginatedResponse helpers; applied to entries, medications, appointments (patient+doctor+admin), reminders, reports, admin doctors. Symptom catalogue and doctor directory deliberately left unpaginated as bounded reference lists (see DECISIONS.md). Verified via curl on each endpoint. |
+| OBS-2 | Done | backend/src/index.js | PHASE 0: /api/health is now liveness-only (always 200); new /api/ready checks DB and ML-service reachability, returns 503 if either is down. Verified via curl with ML service stopped and running. |
+| OBS-1 | Done | backend/src/utils/logger.js, backend/src/middleware/requestLogger.js | PHASE 0: replaced morgan with pino structured JSON logging; every line carries a request id (also returned as X-Request-Id); redact list covers passwords/tokens/free-text health fields. Verified by inspecting live log output. |
+| DEPLOY-11 | Done | .github/workflows/ci.yml, backend/.dockerignore, frontend/.dockerignore, ml_service/.dockerignore | PHASE 0: CI job builds and brings up the full compose stack, polls until every service is healthy, fails otherwise. Verified locally first (not just in CI): docker compose up --build reached (healthy) on all 3 services after fixing a real bug this check surfaced (missing .dockerignore let host node_modules overwrite container-built native bindings — see DECISIONS.md). |
 | CLIN-4 | Partial | frontend copy | v1.0 disclaimer language exists; a systematic audit that every predictive string uses hedged phrasing has not been done. |
 | CLIN-5 | Missing | backend/ml_service self-care content source | Self-care text is generated inline per triage tier (v1.0 Section 8.4), not static dated content labelled 'pending clinical review'. |
 | MED-4 | Done | backend/src/routes/medicationRoutes.js | No dosing-advice or interaction-checking logic found anywhere — already compliant; must remain so. |
@@ -237,16 +237,16 @@ Most "New in 1.1" IDs (Section 10 of the SRS) are Missing, as anticipated by the
 | TEST-5 | Missing | backend, frontend, ml_service | No test files found anywhere in the repository (confirmed via search for *.test.* in backend and frontend). |
 | TEST-6 | Missing | backend, frontend, ml_service | No test files found anywhere in the repository (confirmed via search for *.test.* in backend and frontend). |
 | TEST-7 | Missing | backend, frontend, ml_service | No test files found anywhere in the repository (confirmed via search for *.test.* in backend and frontend). |
-| PERF-5 | Partial | backend/src/routes/entryRoutes.js etc. | Default limit=50 confirmed on entries; not confirmed as the default everywhere pagination exists. |
+| PERF-5 | Done | backend/src/utils/pagination.js | PHASE 0: shared helper defaults every list endpoint to limit=20 (max 50), except /api/reminders (default 200/max 500 — the in-tab alarm poller and background scheduler need to see every active reminder, see DECISIONS.md). Verified via curl on each paginated endpoint. |
 | PERF-7 | Missing | frontend build config, CI | No bundle-size budget or Lighthouse check found. |
 | MAIN-5 | Partial | README.md, SymptomLog_Launch_Guide.docx | A launch guide exists; no dedicated runbook (backup/restore, retraining, rollback, incident steps) confirmed. |
 | MAIN-7 | Missing | backend/src/db/migrations | No rollback/down scripts found for any of the 7 migrations; none are documented as irreversible either. |
 
-## Phase sequencing implied by this analysis
+## Phase sequencing
 
-- **Phase 0** closes: SEC-20, DEPLOY-11, OBS-1, OBS-2, API-1, API-2, API-3 (remaining routes), plus lint/format tooling and `.env.example` additions.
-- **Phase 1** closes: AUTH-12..19, SEC-13..19, SEC-21, AUDIT-1..3.
-- **Phase 2** closes: ENTRY-8..11, TRIAGE-7..10, NLP-8..10.
+- **Phase 0 — done**: SEC-7, SEC-17..20, AUTH-10, OBS-1, OBS-2, API-1, API-2, API-3, PERF-5, DEPLOY-11, plus lint/format tooling (ESLint+Prettier for backend, oxlint+Prettier for frontend, Ruff+Black for ml_service) and `.env.example` completeness.
+- **Phase 1** closes: AUTH-12..19, SEC-13, SEC-14 (CSP itself), SEC-15, SEC-16, SEC-21, AUDIT-1..3.
+- **Phase 2** closes: ENTRY-8..11, TRIAGE-7..10, NLP-8..10 (narrowed: top-3 shape + identifier-exclusion confirmation only, see NLP-10 note).
 - **Phase 3** closes: REM-8..14, APPT-5..9, DOC-9, DOC-12, CARE-4..7, REPORT-3..5.
 - **Phase 4** closes: PRIV-1..6, ADMIN-10..15, CLIN-5.
 - **Phase 5** closes: UI-6..16, DASH-1..5, HIST-3..5, INSIGHTS-2..4, A11Y-1..8, CLIN-4 (audit pass).
