@@ -57,7 +57,7 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: ruff check .
       - run: black --check .
-      - run: pytest --no-header -q || true # TEST-4: real tests land in Phase 6; this step is a no-op placeholder until then
+      - run: pytest --no-header -q # tests/test_disease_model.py (Phase 2); the full TEST-4 contract/fallback suite is Phase 6
       - run: pip install pip-audit && pip-audit --strict || true # advisory until Phase 6 pins/triages known findings
 
   docker-compose-health:

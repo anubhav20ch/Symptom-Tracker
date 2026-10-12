@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const { sendError } = require('../utils/apiError');
+const { BODY_REGION_CODES } = require('../utils/bodyRegions');
 
 // Wraps a Zod schema into Express middleware: on failure, responds 400 with
 // every validation issue (field path + message only — never the submitted
@@ -114,6 +115,50 @@ const reportGenerateSchema = z
     path: ['start_date']
   });
 
+// ENTRY-11: server-side validation of every symptom-entry field,
+// independent of whatever the client already checked. ENTRY-8 (body
+// region) and ENTRY-10 (follow-up link) are enforced here as field shape;
+// ENTRY-10's ownership check (the linked entry must belong to the same
+// patient) happens in the route handler, since Zod has no DB access.
+const scoreField = (max = 10) => z.coerce.number().min(0).max(max).optional();
+
+const entryFields = {
+  symptom_id: z.coerce.number().int().positive().optional(),
+  symptom_name: z.string().trim().min(1).max(255).optional(),
+  symptom_category: z.string().trim().max(100).optional(),
+  description: z.string().max(5000).optional(),
+  severity: z.coerce.number().int().min(1, 'Severity must be between 1 and 10').max(10, 'Severity must be between 1 and 10'),
+  body_location: z.string().trim().max(150).optional(),
+  body_region_code: z
+    .string()
+    .refine((v) => BODY_REGION_CODES.has(v), { message: 'Unrecognized body region code' })
+    .optional(),
+  trigger: z.string().trim().max(255).optional(),
+  started_at: z.coerce.date().optional(),
+  ended_at: z.coerce.date().optional(),
+  follow_up_to_entry_id: z.coerce.number().int().positive().optional(),
+  emotion_score: scoreField(),
+  energy_level: scoreField(),
+  stress_level: scoreField(),
+  sleep_quality: scoreField(),
+  functional_impairment: scoreField(),
+  urgency_score: scoreField(100)
+};
+
+const entryBaseSchema = z.object(entryFields);
+
+const entryCreateSchema = entryBaseSchema
+  .refine((data) => data.symptom_id || data.symptom_name, {
+    message: 'Either symptom_id or symptom_name is required',
+    path: ['symptom_name']
+  })
+  .refine((data) => !data.started_at || !data.ended_at || data.ended_at >= data.started_at, {
+    message: 'ended_at must be on or after started_at',
+    path: ['ended_at']
+  });
+
+const entryUpdateSchema = entryBaseSchema.partial();
+
 module.exports = {
   validateBody,
   registerSchema,
@@ -124,5 +169,7 @@ module.exports = {
   timezoneSchema,
   reminderSchema,
   reportGenerateSchema,
-  isValidTimeZone
+  isValidTimeZone,
+  entryCreateSchema,
+  entryUpdateSchema
 };

@@ -28,10 +28,10 @@ ENTRY-4,done,backend/src/routes/entryRoutes.js,,manual check: filter list by cat
 ENTRY-5,done,backend/src/routes/entryRoutes.js,,manual check: GET/PUT/DELETE /:id scoped to owner
 ENTRY-6,done,backend/src/routes/entryRoutes.js,,manual check: created entry has classification fields populated
 ENTRY-7,done,frontend/src/pages/LogSymptom.jsx,,manual check: result panel shows confidence + disclaimer
-ENTRY-8,missing,,,not implemented — structured body-region field
-ENTRY-9,missing,,,not implemented — onset/resolution date-time
-ENTRY-10,missing,,,not implemented — follow-up linkage
-ENTRY-11,missing,,,not implemented — server-side validation audit
+ENTRY-8,done,backend/src/utils/bodyRegions.js; migration 010,,manual check: GET /api/symptoms/body-regions; POST /api/entries with body_region_code persists and round-trips
+ENTRY-9,done,backend/src/db/migrations/001_init.sql,,already present (started_at/ended_at); ordering enforced via entryCreateSchema
+ENTRY-10,done,backend/src/routes/entryRoutes.js; migration 010,,manual check: follow-up to own entry succeeds; follow-up to another patient's entry id returns INVALID_FOLLOW_UP_ENTRY
+ENTRY-11,done,backend/src/middleware/validate.js (entryCreateSchema/entryUpdateSchema),,manual check: bad body_region_code/severity/ended_at-before-started_at all return VALIDATION_ERROR
 NLP-1,done,ml_service/main.py; backend/src/routes/nlpRoutes.js,,manual check: POST /api/nlp/extract
 NLP-2,done,backend/src/routes/nlpRoutes.js,,manual check: POST /api/nlp/smart-analyze
 NLP-3,done,ml_service/main.py,,manual check: POST /api/nlp/predict-disease
@@ -39,19 +39,19 @@ NLP-4,done,ml_service/main.py,,manual check: GET /api/nlp/diseases
 NLP-5,done,backend/src/routes/nlpRoutes.js,,manual check: stop ml_service, confirm keyword fallback still returns a result
 NLP-6,done,backend/src/routes/feedbackRoutes.js,,manual check: POST /api/feedback
 NLP-7,done,backend/src/routes/feedbackRoutes.js,,manual check: GET /api/feedback/stats
-NLP-8,missing,,,not implemented — model version stored with prediction
-NLP-9,missing,,,not implemented — low-confidence UI handling
-NLP-10,partial,ml_service/main.py (predict-disease),,corrected on closer read: response already includes primary + 3 alternative_diseases (top-4 shape); gap is identifier-exclusion confirmation and conforming the shape to a flat top-3 list
+NLP-8,done,ml_service/disease_model.py; model.py,,manual check: both /extract and /predict-disease responses include model_version
+NLP-9,done,ml_service/disease_model.py (LOW_CONFIDENCE_THRESHOLD),ml_service/tests/test_disease_model.py,test_low_confidence_flag_matches_threshold / test_empty_text_is_flagged_low_confidence
+NLP-10,done,ml_service/disease_model.py (candidates),ml_service/tests/test_disease_model.py,test_predict_returns_exactly_three_candidates; identifier-exclusion confirmed by code review of main.py request models
 TRIAGE-1,done,backend triage logic,,manual check: entries land in exactly one of 4 tiers
 TRIAGE-2,done,backend triage logic,,manual check: chest pain severity 7 -> Urgent tier
 TRIAGE-3,done,backend triage logic,,manual check: 90+ day duration -> Chronic tier
 TRIAGE-4,done,backend triage logic,,manual check: same symptom x3 in 30 days -> Recurring tier
 TRIAGE-5,done,backend triage logic,,manual check: <14 day isolated occurrence -> Routine tier
 TRIAGE-6,done,backend triage logic,,manual check: tier result includes a specialist recommendation where applicable
-TRIAGE-7,missing,,,not implemented — single versioned triage module
-TRIAGE-8,partial,,,thresholds exist; explicit precedence ordering unverified
-TRIAGE-9,missing,,,not implemented — stored reasoning per result
-TRIAGE-10,partial,,,urgent messaging exists; dedicated always-shown emergency notice unverified
+TRIAGE-7,done,backend/src/services/classificationEngine.js (TRIAGE_ENGINE_VERSION); migration 010,backend/tests/triage.test.js,every result asserts triage_version is truthy
+TRIAGE-8,done,backend/src/services/classificationEngine.js,backend/tests/triage.test.js,urgent-overrides-chronic precedence test
+TRIAGE-9,done,backend/src/services/classificationEngine.js (rule_id); migration 010,backend/tests/triage.test.js,each boundary test asserts the specific rule_id fired
+TRIAGE-10,done,backend/src/services/classificationEngine.js (requires_emergency_notice),backend/tests/triage.test.js,asserted true for urgent / false for acute
 HIST-1,done,frontend/src/pages/History.jsx; backend entryRoutes.js,,manual check: filters combine correctly
 HIST-2,done,frontend/src/pages/History.jsx,,manual check: severity trend renders
 HIST-3,missing,,,not implemented — column sorting
@@ -219,7 +219,7 @@ A11Y-5,missing,,,not implemented — visible label audit
 A11Y-6,missing,,,not implemented — announced error summaries
 A11Y-7,missing,,,not implemented — text alternatives for icons/markers
 A11Y-8,missing,,,not implemented — prefers-reduced-motion support
-TEST-1,missing,,,not implemented — triage boundary unit tests
+TEST-1,done,backend/src/services/classificationEngine.js,backend/tests/triage.test.js,16 boundary tests across all four tiers, all passing
 TEST-2,missing,,,not implemented — patient isolation integration tests
 TEST-3,missing,,,not implemented — physician least-privilege integration tests
 TEST-4,missing,,,not implemented — ML contract + fallback tests

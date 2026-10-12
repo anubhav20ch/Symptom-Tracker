@@ -281,6 +281,9 @@ async function predictDiseaseFromText(text) {
       category: 'General',
       confidence: 0,
       alternative_diseases: [],
+      candidates: [],
+      low_confidence: true,
+      model_version: null,
       disclaimer:
         'The disease prediction model is temporarily unavailable. Please try again shortly.'
     };

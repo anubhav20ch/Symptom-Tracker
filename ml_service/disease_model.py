@@ -11,6 +11,7 @@ which is the "diseases it can detect" capability of the NLP engine.
 import csv
 import os
 import re
+from datetime import datetime, timezone
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -67,6 +68,15 @@ def load_dataset():
     return load_dataset_from_path(DATA_PATH)
 
 
+# NLP-9: below this top-candidate confidence, the result is flagged
+# low_confidence so the UI can show a review prompt instead of asserting
+# the prediction outright (Phase 5 renders this; the flag itself is set
+# here, next to the number it's judging). Tunable: with 24 roughly-
+# balanced classes a uniform-random guess would score ~0.04, so 0.3 is a
+# deliberately conservative floor, not a tight one.
+LOW_CONFIDENCE_THRESHOLD = 0.3
+
+
 class DiseasePredictionModel:
     """TF-IDF + Logistic Regression multiclass classifier over Symptom2Disease."""
 
@@ -75,7 +85,19 @@ class DiseasePredictionModel:
         self.classes_ = []
         self.holdout_accuracy = None
         self.holdout_f1 = None
+        self.trained_at = None
         self.train()
+
+    @property
+    def model_version(self):
+        # NLP-8: identifies exactly which trained artifact produced a given
+        # result. Retraining (ADMIN-8/ADMIN-12) replaces this in place;
+        # a full versioned model registry with rollback is Phase 4 scope
+        # (ADMIN-13..15) -- this is the minimal "which model made this call"
+        # answer needed now.
+        if not self.trained_at:
+            return "disease-model-untrained"
+        return f"disease-model-{self.trained_at}"
 
     def train(self, custom_path=None):
         texts, labels = load_dataset() if not custom_path else load_dataset_from_path(custom_path)
@@ -120,6 +142,7 @@ class DiseasePredictionModel:
         # Refit on the full dataset for best production accuracy once validated
         self.pipeline.fit(texts, labels)
         self.classes_ = sorted(set(labels))
+        self.trained_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
         print(
             f"[DiseaseModel] Successfully retrained on {len(texts)} samples, "
@@ -152,36 +175,43 @@ class DiseasePredictionModel:
                 "category": "General",
                 "confidence": 0.0,
                 "alternative_diseases": [],
+                "candidates": [],
+                "low_confidence": True,
                 "model_holdout_accuracy": self.holdout_accuracy,
+                "model_version": self.model_version,
             }
 
         probs = self.pipeline.predict_proba([clean])[0]
         classes = self.pipeline.classes_
         order = np.argsort(probs)[::-1]
 
-        best_idx = int(order[0])
-        best_label = str(classes[best_idx])
-        display_name, category = DISEASE_META.get(best_label, (best_label, "General"))
+        def to_candidate(idx):
+            label = str(classes[idx])
+            display, category = DISEASE_META.get(label, (label, "General"))
+            return {"disease": display, "category": category, "confidence": round(float(probs[idx]), 3)}
 
-        alternatives = []
-        for idx in order[1:4]:
-            if probs[idx] > 0.03:
-                alt_label = str(classes[idx])
-                alt_display, alt_category = DISEASE_META.get(alt_label, (alt_label, "General"))
-                alternatives.append(
-                    {
-                        "disease": alt_display,
-                        "category": alt_category,
-                        "confidence": round(float(probs[idx]), 3),
-                    }
-                )
+        best_idx = int(order[0])
+        display_name, category = DISEASE_META.get(str(classes[best_idx]), (str(classes[best_idx]), "General"))
+        best_confidence = round(float(probs[best_idx]), 3)
+
+        # NLP-10: exactly the top three candidates, unfiltered by any
+        # confidence floor -- a caller that only wants "worth mentioning"
+        # alternatives still has `alternative_diseases` for that.
+        candidates = [to_candidate(idx) for idx in order[:3]]
+
+        alternatives = [to_candidate(idx) for idx in order[1:4] if probs[idx] > 0.03]
 
         return {
             "disease": display_name,
             "category": category,
-            "confidence": round(float(probs[best_idx]), 3),
+            "confidence": best_confidence,
             "alternative_diseases": alternatives,
+            "candidates": candidates,
+            # NLP-9: a conservative floor, not a tight one -- see
+            # LOW_CONFIDENCE_THRESHOLD's own comment.
+            "low_confidence": best_confidence < LOW_CONFIDENCE_THRESHOLD,
             "model_holdout_accuracy": self.holdout_accuracy,
+            "model_version": self.model_version,
         }
 
 

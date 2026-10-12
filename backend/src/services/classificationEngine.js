@@ -3,6 +3,13 @@ const { query } = require('../config/db');
 const MEDICAL_DISCLAIMER =
   'This tool does not provide medical diagnosis. Please consult a healthcare professional for medical advice.';
 
+// TRIAGE-7: this file is the single, versioned triage module. Every
+// result carries this version so a later change to the thresholds below
+// doesn't silently reinterpret an already-stored historical result.
+// Thresholds themselves are unchanged from v1.0/SRS TRIAGE-2..5 -- bumping
+// this version is only for a genuine rule change, not routine refactoring.
+const TRIAGE_ENGINE_VERSION = '1.0.0';
+
 function getRecommendedSpecialist(symptom, category) {
   const s = (symptom || '').toLowerCase();
   const c = (category || '').toLowerCase();
@@ -160,7 +167,13 @@ async function classifySymptomEntry({
     Math.max(5.0, Math.round(calculatedUrgencyScore * 0.85))
   );
 
-  // 1. Check Urgent Red-Flag Rules
+  // TRIAGE-8: fixed precedence order -- Urgent, then Chronic, then
+  // Recurring, then Routine Acute. Each tier below returns immediately on
+  // match, so an entry that could match more than one tier (e.g. a chronic
+  // migraine logged at severity 9) is always resolved by the highest-
+  // precedence match, never the lowest. Do not reorder these checks.
+
+  // 1. Urgent / Emergency (TRIAGE-2)
   const isSevereHeadacheUrgent =
     (lowerName.includes('headache') || lowerName.includes('migraine')) && sev >= 9;
   const isHighFeverUrgent = lowerName.includes('fever') && sev >= 9;
@@ -176,24 +189,42 @@ async function classifySymptomEntry({
     isDistressUrgent
   ) {
     let reasonDetail = `High-severity (${sev}/10) `;
-    if (isChestPain) reasonDetail += 'cardiovascular symptom detected.';
-    else if (isBreathing) reasonDetail += 'respiratory distress symptom detected.';
-    else if (isSevereHeadacheUrgent) reasonDetail += 'acute severe neurological pain detected.';
-    else if (isDistressUrgent)
+    let ruleId = 'URGENT_CRITICAL_INTENSITY';
+    if (isChestPain) {
+      reasonDetail += 'cardiovascular symptom detected.';
+      ruleId = 'URGENT_CHEST_PAIN';
+    } else if (isBreathing) {
+      reasonDetail += 'respiratory distress symptom detected.';
+      ruleId = 'URGENT_RESPIRATORY_DISTRESS';
+    } else if (isSevereHeadacheUrgent) {
+      reasonDetail += 'acute severe neurological pain detected.';
+      ruleId = 'URGENT_SEVERE_HEADACHE';
+    } else if (isHighFeverUrgent) {
+      reasonDetail += 'high fever reported.';
+      ruleId = 'URGENT_HIGH_FEVER';
+    } else if (isDistressUrgent) {
       reasonDetail += `severe acute pain accompanied by critical emotional distress (Emotion: ${emotion}/10, Stress: ${stress}/10).`;
-    else reasonDetail += 'critical symptom intensity reported.';
+      ruleId = 'URGENT_SEVERITY_WITH_DISTRESS';
+    } else {
+      reasonDetail += 'critical symptom intensity reported.';
+    }
 
     return {
       classification_type: 'urgent',
       urgency_score: Math.max(82.0, calculatedUrgencyScore),
       recommended_specialist: specialist,
+      // TRIAGE-10: the emergency notice is always part of the urgent
+      // recommendation text, never conditional on anything else.
+      requires_emergency_notice: true,
       recommendation: `EMERGENCY / URGENT ADVICE: Please seek immediate emergency medical evaluation (Call 108 / 102 or visit nearest ER). Recommended Specialist: ${specialist}. ${reasonDetail} Please do not delay.`,
       reasoning: `Urgent safety rule triggered: ${reasonDetail} High severity score (${sev}/10) and urgency index (${Math.max(82, calculatedUrgencyScore)}/100) indicate immediate medical evaluation.`,
-      disclaimer: MEDICAL_DISCLAIMER
+      disclaimer: MEDICAL_DISCLAIMER,
+      triage_version: TRIAGE_ENGINE_VERSION,
+      rule_id: ruleId
     };
   }
 
-  // 2. Check Chronic Rules
+  // 2. Chronic Care (TRIAGE-3)
   const isKnownChronic =
     Array.isArray(userChronicConditions) &&
     userChronicConditions.some(
@@ -210,23 +241,26 @@ async function classifySymptomEntry({
       classification_type: 'chronic',
       urgency_score: calculatedUrgencyScore,
       recommended_specialist: specialist,
+      requires_emergency_notice: false,
       recommendation: `Recommended Specialist: ${specialist}. Follow your personalized care management plan. Track symptom triggers, maintain prescribed maintenance medication, and schedule regular check-ins with your doctor.`,
       reasoning: `Chronic condition rule: ${reasonText}`,
-      disclaimer: MEDICAL_DISCLAIMER
+      disclaimer: MEDICAL_DISCLAIMER,
+      triage_version: TRIAGE_ENGINE_VERSION,
+      rule_id: isKnownChronic ? 'CHRONIC_KNOWN_CONDITION' : 'CHRONIC_LONG_DURATION'
     };
   }
 
-  // 3. Check Recurring Rules (3+ times in rolling 30-day window)
+  // 3. Recurring Pattern (TRIAGE-4): 3+ times in rolling 30-day window
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   let pastOccurrences = 0;
 
   if (userId) {
     try {
       const countRes = await query(
-        `SELECT COUNT(*) as count 
+        `SELECT COUNT(*) as count
          FROM symptom_entries se
          JOIN symptoms s ON se.symptom_id = s.id
-         WHERE se.user_id = $1 
+         WHERE se.user_id = $1
            AND (LOWER(s.name) = $2 OR LOWER(s.name) LIKE $3)
            AND se.started_at >= $4`,
         [userId, lowerName, `%${lowerName}%`, thirtyDaysAgo]
@@ -243,21 +277,27 @@ async function classifySymptomEntry({
       classification_type: 'recurring',
       urgency_score: calculatedUrgencyScore,
       recommended_specialist: specialist,
+      requires_emergency_notice: false,
       recommendation: `Recommended Specialist: ${specialist}. This is your ${pastOccurrences + 1}th occurrence of "${symptomName}" within the last 30 days. We suggest booking an appointment to investigate underlying causes or adjust preventative therapy.`,
       reasoning: `Recurring pattern rule: Logged ${pastOccurrences + 1} times within a rolling 30-day window (threshold ≥ 3).`,
-      disclaimer: MEDICAL_DISCLAIMER
+      disclaimer: MEDICAL_DISCLAIMER,
+      triage_version: TRIAGE_ENGINE_VERSION,
+      rule_id: 'RECURRING_PATTERN_30D'
     };
   }
 
-  // 4. Acute Rule (duration < 14 days, isolated occurrence)
+  // 4. Routine Acute (TRIAGE-5): duration < 14 days, isolated occurrence
   const selfCareTips = getSelfCareAdvice(lowerName, lowerCategory, sev);
   return {
     classification_type: 'acute',
     urgency_score: Math.min(45.0, calculatedUrgencyScore),
     recommended_specialist: specialist,
+    requires_emergency_notice: false,
     recommendation: selfCareTips,
     reasoning: `Acute episode rule: Short duration (${durationDays} days < 14 days) and isolated occurrence. Pain ${sev}/10, Emotion ${emotion}/10. Suitable for self-care and monitoring.`,
-    disclaimer: MEDICAL_DISCLAIMER
+    disclaimer: MEDICAL_DISCLAIMER,
+    triage_version: TRIAGE_ENGINE_VERSION,
+    rule_id: 'ROUTINE_ACUTE'
   };
 }
 
@@ -265,5 +305,6 @@ module.exports = {
   classifySymptomEntry,
   MEDICAL_DISCLAIMER,
   getRecommendedSpecialist,
-  getSelfCareAdvice
+  getSelfCareAdvice,
+  TRIAGE_ENGINE_VERSION
 };

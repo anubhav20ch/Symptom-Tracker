@@ -112,6 +112,8 @@ paths:
     post: { tags: [Symptoms], summary: 'Add a symptom to the catalogue (SYM-3)' }
   /symptoms/autocomplete:
     get: { tags: [Symptoms], summary: 'Autocomplete search over the catalogue (SYM-2)' }
+  /symptoms/body-regions:
+    get: { tags: [Symptoms], summary: 'Fixed body-region vocabulary for the front/back body map (ENTRY-8)' }
   /entries:
     get:
       { tags: [Entries], summary: "List the patient's own symptom entries, filterable (ENTRY-4)" }

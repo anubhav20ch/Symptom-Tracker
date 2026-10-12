@@ -3,6 +3,13 @@ const router = express.Router();
 const { sendError } = require('../utils/apiError');
 const { query } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
+const { BODY_REGIONS } = require('../utils/bodyRegions');
+
+// ENTRY-8: the fixed body-region vocabulary the front/back body map (UI-9)
+// will render. Small, bounded, reference data -- no pagination needed.
+router.get('/body-regions', (req, res) => {
+  res.json({ body_regions: BODY_REGIONS });
+});
 
 // Get all symptoms
 router.get('/', async (req, res) => {

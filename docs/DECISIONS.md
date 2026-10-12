@@ -20,6 +20,24 @@ The SRS has 233 distinct requirement IDs across v1.0 and v1.1. Rather than a bin
 
 **Decision:** `docs/GAP_ANALYSIS.md` rows cite the exact files inspected and the specific missing piece, so each "Partial" or "Missing" row is independently actionable without re-deriving the audit.
 
+## 2026-10-13 — Phase 2: model version is a timestamp, not a registry entry
+
+NLP-8 asks for a model version stored with every prediction. The ML service has no model registry yet (ADMIN-13..15, which govern versioned activation/rollback, are explicitly Phase 4 scope).
+
+**Decision:** used the simplest thing that is still a genuine, distinguishing version identifier: a timestamp captured at train time (`disease-model-<ISO timestamp>`) for the disease model, and at process-start time (`symptom-extractor-<ISO timestamp>`) for the extractor, which has no retrain endpoint at all. This answers "which model produced this result" correctly today without building registry infrastructure a quarter of the way through the brief's own phase sequence that is explicitly supposed to build it later. When Phase 4 adds the real registry, these timestamps become the natural version keys already in use.
+
+## 2026-10-13 — Phase 2: low-confidence threshold (0.3) is a documented guess, not a calibrated number
+
+NLP-9 requires flagging low-confidence disease predictions. No target precision/recall tradeoff was specified anywhere in the SRS or brief.
+
+**Decision:** picked 0.3 as a deliberately conservative floor (roughly 7-8x better than the ~0.04 a uniform random guess would score across 24 classes), documented inline in `disease_model.py` as a named, tunable constant (`LOW_CONFIDENCE_THRESHOLD`) rather than a bare literal, so adjusting it later is a one-line change with an obvious place to make it, not a buried magic number.
+
+## 2026-10-13 — Phase 2: ENTRY-8's body-region vocabulary is new reference data, body_location is untouched
+
+The existing `body_location` column is free text (populated by NLP extraction or typed by the patient) and has real historical data in it already. ENTRY-8 asks for a *structured* region selectable from a front/back body map.
+
+**Decision:** added `body_region_code` as a new, separate, optional column validated against a fixed 22-entry enum (`backend/src/utils/bodyRegions.js`), rather than trying to retrofit `body_location` into a controlled vocabulary (which would have broken every existing entry's data and the NLP extractor's free-text output). The enum is exposed at `GET /api/symptoms/body-regions` for the Phase 5 body-map component to consume directly.
+
 ## 2026-10-13 — Phase 1: AUDIT-2 scope is representative, not exhaustive
 
 AUDIT-2 says a physician or administrator accessing a specific patient's data should be logged. The system has many such read paths (every doctor/admin endpoint that touches patient rows). Logging all of them in this phase would mean touching nearly every route file a second time.

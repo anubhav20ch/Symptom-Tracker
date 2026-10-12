@@ -7,6 +7,7 @@ const { classifySymptomEntry } = require('../services/classificationEngine');
 const upload = require('../middleware/upload');
 const { parsePagination, paginatedResponse } = require('../utils/pagination');
 const { sendError } = require('../utils/apiError');
+const { validateBody, entryCreateSchema, entryUpdateSchema } = require('../middleware/validate');
 
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
@@ -139,7 +140,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // POST /api/entries - Create symptom entry with automated classification
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, validateBody(entryCreateSchema), async (req, res) => {
   try {
     let {
       symptom_id,
@@ -148,9 +149,11 @@ router.post('/', authenticateToken, async (req, res) => {
       description,
       severity,
       body_location,
+      body_region_code,
       trigger,
       started_at,
       ended_at,
+      follow_up_to_entry_id,
       emotion_score = 5.0,
       energy_level = 5.0,
       stress_level = 5.0,
@@ -159,8 +162,19 @@ router.post('/', authenticateToken, async (req, res) => {
       urgency_score
     } = req.body;
 
-    if (!severity || (!symptom_id && !symptom_name)) {
-      return sendError(res, 400, 'Symptom and severity (1-10) are required');
+    // ENTRY-10: a follow-up link may only point at an entry the same
+    // patient owns -- otherwise this would leak the existence of another
+    // patient's entry id.
+    if (follow_up_to_entry_id) {
+      const followCheck = await query('SELECT id FROM symptom_entries WHERE id = $1 AND user_id = $2', [
+        follow_up_to_entry_id,
+        req.user.id
+      ]);
+      if (followCheck.rows.length === 0) {
+        return sendError(res, 400, 'follow_up_to_entry_id must reference one of your own entries', {
+          code: 'INVALID_FOLLOW_UP_ENTRY'
+        });
+      }
     }
 
     // Resolve symptom_id if not given or if new symptom name provided
@@ -221,8 +235,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const insertRes = await query(
       `INSERT INTO symptom_entries
-       (user_id, symptom_id, description, severity, body_location, trigger, started_at, ended_at, classification_type, recommendation, reasoning, emotion_score, energy_level, stress_level, sleep_quality, functional_impairment, urgency_score)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       (user_id, symptom_id, description, severity, body_location, body_region_code, trigger, started_at, ended_at, follow_up_to_entry_id, classification_type, recommendation, reasoning, emotion_score, energy_level, stress_level, sleep_quality, functional_impairment, urgency_score, triage_version, triage_rule_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
        RETURNING *`,
       [
         req.user.id,
@@ -230,9 +244,11 @@ router.post('/', authenticateToken, async (req, res) => {
         description || '',
         parseInt(severity, 10),
         body_location || 'General Body',
+        body_region_code || null,
         trigger || 'None Reported',
         startedTime,
         endedTime,
+        follow_up_to_entry_id || null,
         classification.classification_type,
         classification.recommendation,
         classification.reasoning,
@@ -241,7 +257,9 @@ router.post('/', authenticateToken, async (req, res) => {
         parseFloat(stress_level) || 5.0,
         parseFloat(sleep_quality) || 5.0,
         parseFloat(functional_impairment) || 3.0,
-        finalUrgency
+        finalUrgency,
+        classification.triage_version || null,
+        classification.rule_id || null
       ]
     );
 
@@ -269,9 +287,10 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // PUT /api/entries/:id - Update entry
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, validateBody(entryUpdateSchema), async (req, res) => {
   try {
-    const { description, severity, body_location, trigger, started_at, ended_at } = req.body;
+    const { description, severity, body_location, body_region_code, trigger, started_at, ended_at, follow_up_to_entry_id } =
+      req.body;
 
     // Check ownership
     const check = await query('SELECT * FROM symptom_entries WHERE id = $1 AND user_id = $2', [
@@ -280,6 +299,19 @@ router.put('/:id', authenticateToken, async (req, res) => {
     ]);
     if (check.rows.length === 0) {
       return sendError(res, 404, 'Entry not found');
+    }
+
+    // ENTRY-10: same ownership rule as creation.
+    if (follow_up_to_entry_id) {
+      const followCheck = await query('SELECT id FROM symptom_entries WHERE id = $1 AND user_id = $2', [
+        follow_up_to_entry_id,
+        req.user.id
+      ]);
+      if (followCheck.rows.length === 0) {
+        return sendError(res, 400, 'follow_up_to_entry_id must reference one of your own entries', {
+          code: 'INVALID_FOLLOW_UP_ENTRY'
+        });
+      }
     }
 
     const current = check.rows[0];
@@ -309,23 +341,31 @@ router.put('/:id', authenticateToken, async (req, res) => {
        SET description = COALESCE($1, description),
            severity = COALESCE($2, severity),
            body_location = COALESCE($3, body_location),
-           trigger = COALESCE($4, trigger),
-           started_at = COALESCE($5, started_at),
-           ended_at = $6,
-           classification_type = $7,
-           recommendation = $8,
-           reasoning = $9
-       WHERE id = $10 AND user_id = $11`,
+           body_region_code = COALESCE($4, body_region_code),
+           trigger = COALESCE($5, trigger),
+           started_at = COALESCE($6, started_at),
+           ended_at = $7,
+           follow_up_to_entry_id = COALESCE($8, follow_up_to_entry_id),
+           classification_type = $9,
+           recommendation = $10,
+           reasoning = $11,
+           triage_version = $12,
+           triage_rule_id = $13
+       WHERE id = $14 AND user_id = $15`,
       [
         description,
         newSeverity,
         body_location,
+        body_region_code,
         trigger,
         newStart,
         newEnd,
+        follow_up_to_entry_id,
         classification.classification_type,
         classification.recommendation,
         classification.reasoning,
+        classification.triage_version || null,
+        classification.rule_id || null,
         req.params.id,
         req.user.id
       ]

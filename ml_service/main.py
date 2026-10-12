@@ -44,6 +44,8 @@ class ExtractResponse(BaseModel):
     trigger: str
     alternative_symptoms: List[AlternativeSymptom]
     extracted_keywords: List[str]
+    # NLP-8: identifies exactly which trained artifact produced this result.
+    model_version: Optional[str] = None
 
 
 class FeedbackRequest(BaseModel):
@@ -70,7 +72,15 @@ class DiseasePredictResponse(BaseModel):
     category: str
     confidence: float
     alternative_diseases: List[AlternativeDisease]
+    # NLP-10: exactly the top three candidates (unfiltered), for a caller
+    # that wants to show more than just the "worth mentioning" alternatives.
+    candidates: List[AlternativeDisease] = []
+    # NLP-9: true when `confidence` is below the model's own conservative
+    # floor (see disease_model.LOW_CONFIDENCE_THRESHOLD).
+    low_confidence: bool = False
     model_holdout_accuracy: Optional[float] = None
+    # NLP-8: identifies exactly which trained artifact produced this result.
+    model_version: Optional[str] = None
     disclaimer: str = (
         "Advisory NLP estimate only, trained on the Symptom2Disease dataset. "
         "Not a certified medical diagnosis -- consult a licensed physician."

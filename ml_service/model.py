@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -14,6 +15,10 @@ class SymptomNLPModel:
         self.category_map = {}
         self.default_location_map = {}
         self.default_severity_map = {}
+        # NLP-8: this extractor has no retrain endpoint (unlike
+        # disease_model.py), so its version is simply when this process
+        # instance trained it at startup.
+        self.model_version = f"symptom-extractor-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         self.train()
 
     def train(self):
@@ -180,6 +185,7 @@ class SymptomNLPModel:
                 "trigger": "None Reported",
                 "alternative_symptoms": [],
                 "extracted_keywords": [],
+                "model_version": self.model_version,
             }
 
         # Predict symptom and probabilities
@@ -225,6 +231,7 @@ class SymptomNLPModel:
             "trigger": trigger,
             "alternative_symptoms": alternatives,
             "extracted_keywords": extracted_keywords,
+            "model_version": self.model_version,
         }
 
 
