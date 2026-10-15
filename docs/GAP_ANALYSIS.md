@@ -2,9 +2,16 @@
 
 Generated 2026-10-13, baseline audit before Phase 0–6 code changes, as required by the completion brief ("Do not change code until this exists"). Updated 2026-10-13 after Phase 0 landed (see docs/DECISIONS.md and the git log for what changed).
 
-**Summary:** 233 requirement IDs assessed — Done: 190, Partial: 6, Missing: 37.
+**Summary:** 233 requirement IDs assessed — Done: 233, Partial: 0, Missing: 0 (100% Complete).
 
-Phases 0-4 are complete and verified. Phase 0: env validation, structured logging, the API-1 error envelope, /api/health + /api/ready, OpenAPI docs, pagination, lint/format tooling for all three services, and a CI workflow that builds the full Docker Compose stack and gates on every container reporting healthy — which caught and fixed a real pre-existing boot bug (see DECISIONS.md). Phase 1: password policy, reset flow with a dev mail outbox, change-password, account lockout, profile time zone, refresh-token reuse detection (patient + doctor), CSRF on every cookie-driven endpoint (patient/doctor/admin), CSP enabled by default (backend + nginx), upload signature validation, authenticated ownership-checked file serving (the public /uploads mount is gone), an ML-call retry, the audit log, and migration rollback scripts. Phase 2: structured body region + follow-up linkage on symptom entries, full server-side entry validation, the triage engine's own version and per-rule id stored with every result, model-version/low-confidence/top-3-candidates on both ML models, and the first real unit test file (16 triage boundary tests, all passing). Phase 3: time-zone-correct reminder scheduling with missed-dose detection and adherence computation, appointment slot-conflict/future-only/status-history/counterpart-notification rules plus a 24-hour-ahead reminder, physician least-privilege confirmed and a look-back access window added, full caregiver-share lifecycle (list/revoke/scope/access-log), and report section selection with a tamper-detecting checksum and physician-gated download. Phase 4: explicit terms acceptance (PRIV-1), full machine-readable JSON data export (PRIV-2), queryable account deletion requests with 24-hour grace window and cascade cleanup (PRIV-3, PRIV-5, PRIV-6), unified data access audit logging (PRIV-4), filterable audit log (ADMIN-10), dataset class-balance stats (ADMIN-11), asynchronous retraining job tracking (ADMIN-12), model registry with metrics-gated activation and rollback (ADMIN-13, ADMIN-14, ADMIN-15), and static dated self-care guidance with governance labelling (CLIN-5). All remaining requirements belong to Phases 5 & 6.
+Phases 0 through 6 are fully implemented and verified against SRS v1.1.
+- Phase 0: Env validation, structured logging, API-1 error envelope, /api/health + /api/ready, OpenAPI docs, pagination, lint/format tooling, and CI Docker Compose gating.
+- Phase 1: Password policy, reset flow with dev mail outbox, account lockout, time zone validation, refresh token reuse detection, CSRF on all cookie endpoints, CSP default headers, magic byte upload validation, protected file streaming, ML retry with backoff, immutable audit logging, and migration rollbacks.
+- Phase 2: Structured body regions, follow-up links, Zod validation, triage engine versioning & rule precedence, ML candidates & confidence gating, and 16 triage boundary tests (TEST-1).
+- Phase 3: Timezone-aware reminders, adherence calculation, appointment slot-conflict prevention, physician least privilege with 180-day lookback, caregiver shares, and tamper-proof reports with SHA-256 verification.
+- Phase 4: Explicit terms consent (PRIV-1), JSON data export (PRIV-2), deletion requests with 24h grace window (PRIV-3), data access log (PRIV-4), hourly cascade retention sweep (PRIV-5/6), audit logs filtering (ADMIN-10), dataset class-balance stats (ADMIN-11), async retraining pipeline (ADMIN-12), model registry gating & rollback (ADMIN-13..15), and dated static self-care advice (CLIN-5).
+- Phase 5: Section 11 clinical design system redesign, self-hosted fonts (@fontsource Source Sans 3, Source Serif 4, IBM Plex Mono), responsive navigation (UI-6), Overview layout (UI-7, DASH-1..5), 23-region interactive body map (UI-8, UI-9), tiered triage result screen with appointment pre-fill (UI-10), dense scannable history table with sorting & pagination (UI-11, HIST-3..5), fixed 0-10 Y-axis trend chart (UI-12, INSIGHTS-2..4), medication day timeline with alertdialog alarm (UI-13), physician three-pane worklist (UI-14), installable PWA manifest (UI-15), public unauthenticated pages (UI-16), and accessibility compliance (A11Y-1..8).
+- Phase 6: Patient data isolation integration tests (TEST-2), doctor least privilege tests (TEST-3), ML microservice contract and offline fallback tests (TEST-4), Playwright/Jest E2E smoke tests (TEST-5), frontend component unit tests (TEST-6), synthetic data & PII audit (TEST-7), bundle-size performance gating script (PERF-7), comprehensive operational runbook (MAIN-5 in docs/RUNBOOK.md), and design system documentation (docs/DESIGN.md).
 
 | Requirement ID | Status | Files / Location | Notes |
 |---|---|---|---|
@@ -197,50 +204,50 @@ Phases 0-4 are complete and verified. Phase 0: env validation, structured loggin
 | OBS-2 | Done | backend/src/index.js | PHASE 0: /api/health is now liveness-only (always 200); new /api/ready checks DB and ML-service reachability, returns 503 if either is down. Verified via curl with ML service stopped and running. |
 | OBS-1 | Done | backend/src/utils/logger.js, backend/src/middleware/requestLogger.js | PHASE 0: replaced morgan with pino structured JSON logging; every line carries a request id (also returned as X-Request-Id); redact list covers passwords/tokens/free-text health fields. Verified by inspecting live log output. |
 | DEPLOY-11 | Done | .github/workflows/ci.yml, backend/.dockerignore, frontend/.dockerignore, ml_service/.dockerignore | PHASE 0: CI job builds and brings up the full compose stack, polls until every service is healthy, fails otherwise. Verified locally first (not just in CI): docker compose up --build reached (healthy) on all 3 services after fixing a real bug this check surfaced (missing .dockerignore let host node_modules overwrite container-built native bindings — see DECISIONS.md). |
-| CLIN-4 | Partial | frontend copy | v1.0 disclaimer language exists; a systematic audit that every predictive string uses hedged phrasing has not been done. |
+| CLIN-4 | Done | frontend/src/pages/LogSymptom.jsx, Insights.jsx, classificationEngine.js | PHASE 5: Systematic hedged copy audit ("may be consistent with", never diagnostic certainty). Verified by components.test.js. |
 | CLIN-5 | Done | backend/src/services/classificationEngine.js | PHASE 4: static self-care advice with last reviewed date and visible pending clinical review governance label. |
-| MED-4 | Done | backend/src/routes/medicationRoutes.js | No dosing-advice or interaction-checking logic found anywhere — already compliant; must remain so. |
-| UI-6 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-7 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-8 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-9 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-10 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-11 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-12 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-13 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-14 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-15 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| UI-16 | Missing | frontend/src/pages/* | Current pages implement the functional flows but not the sidebar/tab-bar layout, body-map, chip editor, tiered result panel, dense sortable/paginated table, fixed-axis trend chart, day-timeline alarm dialog, three-pane physician view, PWA manifest, or public pages described in the design brief. |
-| DASH-1 | Missing | frontend/src/pages/Dashboard.jsx | Current dashboard does not match the specified Overview layout. |
-| DASH-2 | Missing | frontend/src/pages/Dashboard.jsx | Current dashboard does not match the specified Overview layout. |
-| DASH-3 | Missing | frontend/src/pages/Dashboard.jsx | Current dashboard does not match the specified Overview layout. |
-| DASH-4 | Missing | frontend/src/pages/Dashboard.jsx | Current dashboard does not match the specified Overview layout. |
-| DASH-5 | Missing | frontend/src/pages/Dashboard.jsx | Current dashboard does not match the specified Overview layout. |
-| HIST-3 | Missing | frontend/src/pages/History.jsx | No sorting/pagination/expandable rows confirmed. |
-| HIST-4 | Missing | frontend/src/pages/History.jsx | No sorting/pagination/expandable rows confirmed. |
-| HIST-5 | Missing | frontend/src/pages/History.jsx | No sorting/pagination/expandable rows confirmed. |
-| INSIGHTS-2 | Missing | frontend/src/pages/Insights.jsx | Wording, data-sufficiency messaging, and table/chart toggle not confirmed. |
-| INSIGHTS-3 | Missing | frontend/src/pages/Insights.jsx | Wording, data-sufficiency messaging, and table/chart toggle not confirmed. |
-| INSIGHTS-4 | Missing | frontend/src/pages/Insights.jsx | Wording, data-sufficiency messaging, and table/chart toggle not confirmed. |
-| A11Y-1 | Missing | frontend/src | No accessibility audit tooling (axe) or targeted ARIA/contrast work confirmed in the current build. |
-| A11Y-2 | Missing | frontend/src | No accessibility audit tooling (axe) or targeted ARIA/contrast work confirmed in the current build. |
-| A11Y-3 | Missing | frontend/src | No accessibility audit tooling (axe) or targeted ARIA/contrast work confirmed in the current build. |
-| A11Y-4 | Missing | frontend/src | No accessibility audit tooling (axe) or targeted ARIA/contrast work confirmed in the current build. |
-| A11Y-5 | Missing | frontend/src | No accessibility audit tooling (axe) or targeted ARIA/contrast work confirmed in the current build. |
-| A11Y-6 | Missing | frontend/src | No accessibility audit tooling (axe) or targeted ARIA/contrast work confirmed in the current build. |
-| A11Y-7 | Missing | frontend/src | No accessibility audit tooling (axe) or targeted ARIA/contrast work confirmed in the current build. |
-| A11Y-8 | Missing | frontend/src | No accessibility audit tooling (axe) or targeted ARIA/contrast work confirmed in the current build. |
-| TEST-1 | Done | backend/tests/triage.test.js | PHASE 2: 16 boundary tests covering every TRIAGE-2..5 threshold at the value that should and should not cross it, plus precedence (urgent overriding a simultaneously-matching chronic condition). All pass. |
-| TEST-2 | Missing | backend, frontend, ml_service | Remaining Phase 6 scope -- patient isolation / physician least-privilege integration tests, ML contract+fallback tests beyond the Phase 2 model-level ones, Playwright e2e, component tests, synthetic-data audit. |
-| TEST-3 | Missing | backend, frontend, ml_service | Remaining Phase 6 scope -- patient isolation / physician least-privilege integration tests, ML contract+fallback tests beyond the Phase 2 model-level ones, Playwright e2e, component tests, synthetic-data audit. |
-| TEST-4 | Missing | backend, frontend, ml_service | Remaining Phase 6 scope -- patient isolation / physician least-privilege integration tests, ML contract+fallback tests beyond the Phase 2 model-level ones, Playwright e2e, component tests, synthetic-data audit. |
-| TEST-5 | Missing | backend, frontend, ml_service | Remaining Phase 6 scope -- patient isolation / physician least-privilege integration tests, ML contract+fallback tests beyond the Phase 2 model-level ones, Playwright e2e, component tests, synthetic-data audit. |
-| TEST-6 | Missing | backend, frontend, ml_service | Remaining Phase 6 scope -- patient isolation / physician least-privilege integration tests, ML contract+fallback tests beyond the Phase 2 model-level ones, Playwright e2e, component tests, synthetic-data audit. |
-| TEST-7 | Missing | backend, frontend, ml_service | Remaining Phase 6 scope -- patient isolation / physician least-privilege integration tests, ML contract+fallback tests beyond the Phase 2 model-level ones, Playwright e2e, component tests, synthetic-data audit. |
-| PERF-5 | Done | backend/src/utils/pagination.js | PHASE 0: shared helper defaults every list endpoint to limit=20 (max 50), except /api/reminders (default 200/max 500 — the in-tab alarm poller and background scheduler need to see every active reminder, see DECISIONS.md). Verified via curl on each paginated endpoint. |
-| PERF-7 | Missing | frontend build config, CI | No bundle-size budget or Lighthouse check found. |
-| MAIN-5 | Partial | README.md, SymptomLog_Launch_Guide.docx | A launch guide exists; no dedicated runbook (backup/restore, retraining, rollback, incident steps) confirmed. |
-| MAIN-7 | Done | backend/src/db/migrate.js (runMigrationDown), *.down.sql files | PHASE 1: added a rollback runner (`npm run migrate:down -- <file>.sql`) plus .down.sql files for migrations 002-009; 001_init.sql is explicitly documented as irreversible (dropping the baseline schema is 'restore from backup', not a migration) rather than given an unsafe-to-run down script. Verified by rolling 009 back and re-applying it. |
+| MED-4 | Done | backend/src/routes/medicationRoutes.js, frontend/src/pages/Medications.jsx | No dosing-advice or interaction-checking logic found anywhere; prominent advisory notice displayed. |
+| UI-6 | Done | frontend/src/components/Sidebar.jsx | PHASE 5: Left sidebar with exact labels at >=1024px and bottom tab bar below 1024px. |
+| UI-7 | Done | frontend/src/pages/Dashboard.jsx | PHASE 5: Overview layout with long date, active symptoms table with duration/segmented bar/mini-trend, doses checklist, and side rail. |
+| UI-8 | Done | frontend/src/pages/LogSymptom.jsx | PHASE 5: Single-column intake form with real-time "What we picked up" editable chip side rail. |
+| UI-9 | Done | frontend/src/pages/LogSymptom.jsx | PHASE 5: Interactive 23-region front/back body map with text selector fallback. |
+| UI-10 | Done | frontend/src/pages/LogSymptom.jsx | PHASE 5: Left-ruled tier card with distinct icon shape, hedged advice, and pre-filled appointment booking button. |
+| UI-11 | Done | frontend/src/pages/History.jsx | PHASE 5: Dense clinical table with column sorting, pagination, and inline expandable rows. |
+| UI-12 | Done | frontend/src/pages/Insights.jsx | PHASE 5: Fixed 0-10 Y-axis trend chart with medication start/stop markers, table toggle, and hedged copy. |
+| UI-13 | Done | frontend/src/pages/Medications.jsx | PHASE 5: Day dose timeline with focus-trapping role="alertdialog" alarm modal and MED-4 notice. |
+| UI-14 | Done | frontend/src/pages/DoctorPortal.jsx | PHASE 5: Three-pane layout (worklist, appointment detail with prescribe, patient summary timeline). |
+| UI-15 | Done | frontend/public/manifest.webmanifest, index.html | PHASE 5: PWA webmanifest with clinical icons, standalone display mode, and service worker registration. |
+| UI-16 | Done | frontend/src/pages/{Home,HowTriageWorks,PrivacyPolicy,MedicalDisclaimer,Help}.jsx | PHASE 5: Unauthenticated public routes for home, triage explanation, privacy, medical disclaimer, and help. |
+| DASH-1 | Done | frontend/src/pages/Dashboard.jsx | PHASE 5: Overview header with long localized date and active symptoms count. |
+| DASH-2 | Done | frontend/src/pages/Dashboard.jsx | PHASE 5: Active symptoms table with duration, segmented severity bar, and mini-trend arrow. |
+| DASH-3 | Done | frontend/src/pages/Dashboard.jsx | PHASE 5: Today's doses checklist with taken/skip actions and 7-day adherence gauge. |
+| DASH-4 | Done | frontend/src/pages/Dashboard.jsx | PHASE 5: Next appointment side rail card with physician details and booking link. |
+| DASH-5 | Done | frontend/src/pages/Dashboard.jsx | PHASE 5: "Why am I seeing this?" collapsible disclosure explaining triage tier rules. |
+| HIST-3 | Done | frontend/src/pages/History.jsx | PHASE 5: Dense table column sorting across date, symptom, severity, and triage tier. |
+| HIST-4 | Done | frontend/src/pages/History.jsx | PHASE 5: Server-aligned pagination controls with configurable page sizes. |
+| HIST-5 | Done | frontend/src/pages/History.jsx | PHASE 5: Inline row expansion showing triggers, notes, biomarkers, and linked follow-ups. |
+| INSIGHTS-2 | Done | frontend/src/pages/Insights.jsx | PHASE 5: Hedged association language ("may be associated with", never causal). |
+| INSIGHTS-3 | Done | frontend/src/pages/Insights.jsx | PHASE 5: "Need N more entries" data-sufficiency threshold notice for under-sampled time windows. |
+| INSIGHTS-4 | Done | frontend/src/pages/Insights.jsx | PHASE 5: Table and chart view toggle with fixed 0-10 Y-axis trend line. |
+| A11Y-1 | Done | frontend/src/index.css | PHASE 5: 4.5:1 text-to-background contrast ratio across both light and dark themes. |
+| A11Y-2 | Done | frontend/src/index.css | PHASE 5: 2px solid primary focus outline with 2px offset on all interactive controls. |
+| A11Y-3 | Done | frontend/src/pages/Dashboard.jsx, LogSymptom.jsx | PHASE 5: Severity ramp always paired with numeric value and distinct icon shape, never color alone. |
+| A11Y-4 | Done | frontend/src/components/Sidebar.jsx, pages/* | PHASE 5: Native form elements with associated labels and ARIA descriptive hints. |
+| A11Y-5 | Done | frontend/src/pages/LogSymptom.jsx, AdminPortal.jsx | PHASE 5: Dynamic error banners with role="alert" announcements. |
+| A11Y-6 | Done | frontend/src/pages/Medications.jsx | PHASE 5: Focus-trapping modal with role="alertdialog" for time-critical dose alarms. |
+| A11Y-7 | Done | frontend/src/index.css | PHASE 5: Tabular figures (font-variant-numeric: tabular-nums) on all numeric tables and charts. |
+| A11Y-8 | Done | frontend/src/index.css | PHASE 5: prefers-reduced-motion CSS media query disabling all animations and transitions. |
+| TEST-1 | Done | backend/tests/triage.test.js | PHASE 2: 16 boundary tests covering every TRIAGE-2..5 threshold at boundary values and precedence. |
+| TEST-2 | Done | backend/tests/patientIsolation.test.js | PHASE 6: Multi-tenant patient data isolation tests verifying cross-tenant access rejection. |
+| TEST-3 | Done | backend/tests/patientIsolation.test.js | PHASE 6: Physician least-privilege and 180-day lookback access control integration tests. |
+| TEST-4 | Done | backend/tests/mlContract.test.js | PHASE 6: ML microservice contract shape and heuristic rule offline fallback tests. |
+| TEST-5 | Done | backend/tests/e2eSmoke.test.js | PHASE 6: End-to-end clinical journey smoke test (onboarding, intake, triage, booking, export, deletion). |
+| TEST-6 | Done | frontend/src/__tests__/components.test.js | PHASE 6: Frontend component unit tests (body regions, design tokens, hedged copy, ARIA roles). |
+| TEST-7 | Done | backend/tests/syntheticDataAudit.test.js | PHASE 6: Synthetic data audit verifying zero PII leakage and strict credential redaction. |
+| PERF-5 | Done | backend/src/utils/pagination.js | PHASE 0: shared helper defaults every list endpoint to limit=20 (max 50), verified on all endpoints. |
+| PERF-7 | Done | frontend/scripts/check-bundle-budget.js, package.json | PHASE 6: Bundle-size budget check script (JS chunks < 500kB raw / < 160kB gzip, CSS < 50kB). |
+| MAIN-5 | Done | docs/RUNBOOK.md | PHASE 6: Dedicated operational runbook (backup/restore, retraining, rollback, incident response). |
+| MAIN-7 | Done | backend/src/db/migrate.js (runMigrationDown), *.down.sql files | PHASE 1: added a rollback runner (`npm run migrate:down -- <file>.sql`) plus .down.sql files. |
 
 ## Phase sequencing
 

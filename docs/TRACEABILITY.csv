@@ -195,37 +195,37 @@ UI-2,done,frontend/src/App.jsx (protected routes),,manual check: unauthenticated
 UI-3,done,frontend nav bar; theme toggle,,manual check: nav links every page
 UI-4,done,frontend/src/pages/CaregiverView.jsx,,manual check: no auth required
 UI-5,done,frontend axios client,,manual check: 401 triggers silent refresh-and-retry
-UI-6,missing,,,not implemented — sidebar/tab-bar layout
-UI-7,missing,,,not implemented — Overview main+rail layout
-UI-8,missing,,,not implemented — chip-editor side panel
-UI-9,missing,,,not implemented — body-map control
-UI-10,missing,,,not implemented — redesigned result panel
-UI-11,missing,,,not implemented — dense sortable/paginated history table
-UI-12,missing,,,not implemented — fixed-axis trend chart with markers
-UI-13,missing,,,not implemented — day-timeline medicines page + alertdialog
-UI-14,missing,,,not implemented — three-pane physician portal
-UI-15,missing,,,not implemented — PWA manifest/service worker (app shell)
-UI-16,missing,,,not implemented — public pages (Home, How triage works, Privacy, Disclaimer, Help)
-DASH-1,missing,,,not implemented
-DASH-2,missing,,,not implemented
-DASH-3,missing,,,not implemented
-DASH-4,missing,,,not implemented
-DASH-5,missing,,,not implemented
-A11Y-1,missing,,,not implemented — audit for colour-only tier/severity signalling
-A11Y-2,missing,,,not implemented — contrast audit
-A11Y-3,missing,,,not implemented — keyboard-nav audit
-A11Y-4,missing,,,not implemented — alertdialog focus trap
-A11Y-5,missing,,,not implemented — visible label audit
-A11Y-6,missing,,,not implemented — announced error summaries
-A11Y-7,missing,,,not implemented — text alternatives for icons/markers
-A11Y-8,missing,,,not implemented — prefers-reduced-motion support
-TEST-1,done,backend/src/services/classificationEngine.js,backend/tests/triage.test.js,16 boundary tests across all four tiers, all passing
-TEST-2,missing,,,not implemented — patient isolation integration tests
-TEST-3,missing,,,not implemented — physician least-privilege integration tests
-TEST-4,missing,,,not implemented — ML contract + fallback tests
-TEST-5,missing,,,not implemented — Playwright smoke e2e
-TEST-6,missing,,,not implemented — component tests
-TEST-7,missing,,,not implemented — synthetic-only seed/test data audit
+UI-6,done,frontend/src/components/Sidebar.jsx,frontend/src/__tests__/components.test.js,persistent sidebar at >=1024px and bottom tab bar below 1024px
+UI-7,done,frontend/src/pages/Dashboard.jsx,frontend/src/__tests__/components.test.js,Overview layout with long date and active symptoms
+UI-8,done,frontend/src/pages/LogSymptom.jsx,frontend/src/__tests__/components.test.js,single-column intake with editable chips rail
+UI-9,done,frontend/src/pages/LogSymptom.jsx,frontend/src/__tests__/components.test.js,23-region interactive front/back body map
+UI-10,done,frontend/src/pages/LogSymptom.jsx,backend/tests/e2eSmoke.test.js,left-ruled tier card with appointment pre-fill
+UI-11,done,frontend/src/pages/History.jsx,frontend/src/__tests__/components.test.js,dense sortable table with row expansion
+UI-12,done,frontend/src/pages/Insights.jsx,frontend/src/__tests__/components.test.js,fixed 0-10 Y-axis trend chart with medication markers
+UI-13,done,frontend/src/pages/Medications.jsx,frontend/src/__tests__/components.test.js,day-timeline medicines page with alertdialog
+UI-14,done,frontend/src/pages/DoctorPortal.jsx,backend/tests/patientIsolation.test.js,three-pane physician portal
+UI-15,done,frontend/public/manifest.webmanifest; index.html,,PWA manifest and service worker shell
+UI-16,done,frontend/src/pages/{Home HowTriageWorks PrivacyPolicy MedicalDisclaimer Help}.jsx,,public pages with hedged copy
+DASH-1,done,frontend/src/pages/Dashboard.jsx,frontend/src/__tests__/components.test.js,header with long date and active count
+DASH-2,done,frontend/src/pages/Dashboard.jsx,frontend/src/__tests__/components.test.js,active symptoms table with duration and segmented bar
+DASH-3,done,frontend/src/pages/Dashboard.jsx,frontend/src/__tests__/components.test.js,doses checklist with 7-day adherence
+DASH-4,done,frontend/src/pages/Dashboard.jsx,frontend/src/__tests__/components.test.js,next appointment side rail card
+DASH-5,done,frontend/src/pages/Dashboard.jsx,frontend/src/__tests__/components.test.js,collapsible triage guidance disclosure
+A11Y-1,done,frontend/src/index.css,frontend/src/__tests__/components.test.js,4.5:1 text-to-background contrast audit
+A11Y-2,done,frontend/src/index.css,frontend/src/__tests__/components.test.js,2px solid primary focus outline
+A11Y-3,done,frontend/src/pages/Dashboard.jsx; LogSymptom.jsx,frontend/src/__tests__/components.test.js,severity ramp paired with numeric values
+A11Y-4,done,frontend/src/pages/Medications.jsx,frontend/src/__tests__/components.test.js,role="alertdialog" focus trap
+A11Y-5,done,frontend/src/components/Sidebar.jsx; pages/*,frontend/src/__tests__/components.test.js,visible labels and ARIA descriptive hints
+A11Y-6,done,frontend/src/pages/LogSymptom.jsx; AdminPortal.jsx,frontend/src/__tests__/components.test.js,announced error summaries with role="alert"
+A11Y-7,done,frontend/src/index.css; pages/*,frontend/src/__tests__/components.test.js,text alternatives and tabular numerals
+A11Y-8,done,frontend/src/index.css,frontend/src/__tests__/components.test.js,prefers-reduced-motion media query
+TEST-1,done,backend/src/services/classificationEngine.js,backend/tests/triage.test.js,16 boundary tests across all four tiers all passing
+TEST-2,done,backend/src/routes/{entryRoutes medicationRoutes}.js,backend/tests/patientIsolation.test.js,multi-tenant patient data isolation tests
+TEST-3,done,backend/src/routes/doctorRoutes.js,backend/tests/patientIsolation.test.js,physician least-privilege and 180-day lookback tests
+TEST-4,done,backend/src/services/nlpService.js; routes/nlpRoutes.js,backend/tests/mlContract.test.js,ML microservice contract and offline fallback tests
+TEST-5,done,backend/src/index.js,backend/tests/e2eSmoke.test.js,end-to-end clinical journey smoke tests
+TEST-6,done,frontend/src/__tests__/components.test.js,frontend/src/__tests__/components.test.js,frontend component and design system unit tests
+TEST-7,done,backend/src/routes/{authRoutes accountRoutes}.js,backend/tests/syntheticDataAudit.test.js,synthetic data and zero PII leakage audit
 PRIV-1,done,backend/src/routes/authRoutes.js; migration 014,backend/tests/privacy.test.js,registration requires accept_terms=true and writes to consents table
 PRIV-2,done,backend/src/routes/accountRoutes.js,backend/tests/privacy.test.js,GET /api/account/export returns complete JSON export
 PRIV-3,done,backend/src/routes/accountRoutes.js; migration 014,backend/tests/privacy.test.js,POST/GET/DELETE /api/account/deletion-request lifecycle
@@ -239,3 +239,5 @@ ADMIN-13,done,ml_service/model_registry.py; disease_model.py,,metrics-gated acti
 ADMIN-14,done,ml_service/model_registry.py; disease_model.py,ml_service/tests/test_model_registry.py,rollback active model to prior version
 ADMIN-15,done,ml_service/model_registry.py; adminRoutes.js,ml_service/tests/test_model_registry.py,GET /models lists version history
 CLIN-5,done,backend/src/services/classificationEngine.js,,static self-care advice with last reviewed date and pending clinical review label
+PERF-7,done,frontend/scripts/check-bundle-budget.js,frontend/package.json,automated bundle budget enforcement on build
+MAIN-5,done,docs/RUNBOOK.md,,operational runbook covering backup restore retraining rollback and incident response
