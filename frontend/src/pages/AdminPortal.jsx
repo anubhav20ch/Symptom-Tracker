@@ -20,9 +20,12 @@ import {
   Activity,
   ArrowRight,
   X,
-  FileText
+  FileText,
+  History,
+  RotateCcw,
+  Check,
+  Filter
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { adminApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -30,12 +33,32 @@ export default function AdminPortal() {
   const navigate = useNavigate();
   const { darkMode, toggleDarkMode } = useAuth();
 
-  const [activeTab, setActiveTab] = useState('overview'); // overview | doctors | appointments | dataset
+  const [activeTab, setActiveTab] = useState('overview'); // overview | doctors | appointments | dataset | models | audit
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [doctors, setDoctors] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [datasetStatus, setDatasetStatus] = useState(null);
+
+  // Model Lifecycle State (ADMIN-12..15)
+  const [models, setModels] = useState([]);
+  const [activeModelVersion, setActiveModelVersion] = useState(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [retrainJob, setRetrainJob] = useState(null);
+  const [retrainPolling, setRetrainPolling] = useState(false);
+
+  // Audit Logs State (ADMIN-10)
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditOffset, setAuditOffset] = useState(0);
+  const [auditLimit] = useState(25);
+  const [auditFilters, setAuditFilters] = useState({
+    actor_type: '',
+    action: '',
+    date_from: '',
+    date_to: '',
+  });
+  const [auditLoading, setAuditLoading] = useState(false);
 
   // Doctor Form Modal State
   const [showDoctorModal, setShowDoctorModal] = useState(false);
@@ -62,6 +85,7 @@ export default function AdminPortal() {
   const [datasetUploading, setDatasetUploading] = useState(false);
   const [datasetError, setDatasetError] = useState('');
   const [datasetSuccess, setDatasetSuccess] = useState(null);
+  const [validationReport, setValidationReport] = useState(null);
 
   // Status Notification
   const [notification, setNotification] = useState(null);
@@ -96,6 +120,41 @@ export default function AdminPortal() {
     }
   };
 
+  const loadModelRegistry = async () => {
+    setModelsLoading(true);
+    try {
+      const res = await adminApi.listModels();
+      setModels(res.data?.versions || []);
+      setActiveModelVersion(res.data?.active_version || null);
+    } catch (err) {
+      console.warn('Failed to fetch model versions', err);
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  const loadAuditLogs = async () => {
+    setAuditLoading(true);
+    try {
+      const params = {
+        limit: auditLimit,
+        offset: auditOffset,
+      };
+      if (auditFilters.actor_type) params.actor_type = auditFilters.actor_type;
+      if (auditFilters.action) params.action = auditFilters.action;
+      if (auditFilters.date_from) params.date_from = auditFilters.date_from;
+      if (auditFilters.date_to) params.date_to = auditFilters.date_to;
+
+      const res = await adminApi.getAuditLogs(params);
+      setAuditLogs(res.data?.logs || []);
+      setAuditTotal(res.data?.total || 0);
+    } catch (err) {
+      console.warn('Failed to load audit logs', err);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('symptomlog_admin_token');
     if (!token) {
@@ -104,6 +163,14 @@ export default function AdminPortal() {
     }
     loadAllData();
   }, [navigate]);
+
+  useEffect(() => {
+    if (activeTab === 'models') {
+      loadModelRegistry();
+    } else if (activeTab === 'audit') {
+      loadAuditLogs();
+    }
+  }, [activeTab, auditOffset]);
 
   const handleLogout = async () => {
     try {
@@ -189,7 +256,28 @@ export default function AdminPortal() {
     }
   };
 
-  // Upload Dataset & Retrain
+  // Validate Dataset CSV before upload (ADMIN-11)
+  const handleValidateDataset = async () => {
+    if (!datasetFile) return;
+    setDatasetError('');
+    setValidationReport(null);
+    setDatasetUploading(true);
+
+    const formData = new FormData();
+    formData.append('dataset', datasetFile);
+
+    try {
+      const res = await adminApi.validateDataset(formData);
+      setValidationReport(res.data?.validation || res.data);
+      setNotification({ type: 'success', message: 'Dataset schema and class distribution validated successfully.' });
+    } catch (err) {
+      setDatasetError(err.response?.data?.error?.message || 'Dataset validation failed.');
+    } finally {
+      setDatasetUploading(false);
+    }
+  };
+
+  // Upload Dataset & Start Async Retrain (ADMIN-12)
   const handleDatasetUpload = async (e) => {
     e.preventDefault();
     setDatasetError('');
@@ -212,14 +300,71 @@ export default function AdminPortal() {
     try {
       const res = await adminApi.uploadDataset(formData);
       setDatasetSuccess(res.data);
-      setDatasetFile(null);
-      confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
+      setNotification({ type: 'success', message: res.data?.message || 'Retraining initiated.' });
+      
+      if (res.data?.job_id) {
+        setRetrainJob({ id: res.data.job_id, status: 'running' });
+        pollRetrainJob(res.data.job_id);
+      }
       loadAllData();
     } catch (err) {
-      const msg = err.response?.data?.error?.message || 'Dataset validation or retraining failed. Please verify CSV format.';
+      const msg = err.response?.data?.error?.message || 'Dataset upload failed.';
       setDatasetError(msg);
     } finally {
       setDatasetUploading(false);
+    }
+  };
+
+  const pollRetrainJob = (jobId) => {
+    setRetrainPolling(true);
+    const interval = setInterval(async () => {
+      try {
+        const res = await adminApi.getRetrainStatus(jobId);
+        const job = res.data?.job || res.data;
+        setRetrainJob(job);
+        if (job.status === 'completed' || job.status === 'failed') {
+          clearInterval(interval);
+          setRetrainPolling(false);
+          loadAllData();
+          loadModelRegistry();
+          if (job.status === 'completed') {
+            setNotification({ type: 'success', message: `Retraining job ${jobId} finished: ${job.message || 'New candidate model ready'}` });
+          } else {
+            setNotification({ type: 'error', message: `Retraining job ${jobId} failed: ${job.error || 'Unknown error'}` });
+          }
+        }
+      } catch (err) {
+        clearInterval(interval);
+        setRetrainPolling(false);
+      }
+    }, 2000);
+  };
+
+  // Activate Model Version (ADMIN-13)
+  const handleActivateModel = async (version) => {
+    if (!window.confirm(`Promote model version ${version} to active production? This will route all live triage evaluations to this model.`)) {
+      return;
+    }
+    try {
+      const res = await adminApi.activateModel({ version });
+      setNotification({ type: 'success', message: res.data?.message || `Model ${version} is now active.` });
+      loadModelRegistry();
+    } catch (err) {
+      setNotification({ type: 'error', message: err.response?.data?.error?.message || 'Failed to activate model version.' });
+    }
+  };
+
+  // Rollback Model Version (ADMIN-14)
+  const handleRollbackModel = async (targetVersion) => {
+    if (!window.confirm(`Initiate rollback to version ${targetVersion || 'previous'}?`)) {
+      return;
+    }
+    try {
+      const res = await adminApi.rollbackModel({ target_version: targetVersion });
+      setNotification({ type: 'success', message: res.data?.message || 'Model rollback completed.' });
+      loadModelRegistry();
+    } catch (err) {
+      setNotification({ type: 'error', message: err.response?.data?.error?.message || 'Failed to rollback model.' });
     }
   };
 
@@ -227,15 +372,7 @@ export default function AdminPortal() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-primary)' }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{
-            width: '36px',
-            height: '36px',
-            border: '3px solid var(--border-subtle)',
-            borderTopColor: 'var(--accent-primary)',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-            margin: '0 auto 1rem'
-          }} />
+          <div className="spinner" style={{ margin: '0 auto 1rem' }} />
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Loading administrative station...</p>
         </div>
       </div>
@@ -255,29 +392,27 @@ export default function AdminPortal() {
         padding: '0 2rem',
         position: 'sticky',
         top: 0,
-        zIndex: 40,
-        backdropFilter: 'var(--glass-blur)'
+        zIndex: 40
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
           <div style={{
             width: '36px',
             height: '36px',
-            borderRadius: '10px',
-            background: 'linear-gradient(135deg, #0284c7 0%, #4f46e5 100%)',
+            borderRadius: '4px',
+            backgroundColor: 'var(--accent-primary)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#ffffff',
-            boxShadow: '0 4px 12px rgba(2, 132, 199, 0.35)'
+            color: '#ffffff'
           }}>
             <ShieldCheck size={20} strokeWidth={2.2} />
           </div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
-              Symptom<span style={{ color: '#0284c7' }}>Log</span> Admin Control Center
+            <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+              SymptomLog Clinical Administration
             </div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Master Management Portal
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Governance & ML Lifecycle Station
             </div>
           </div>
         </div>
@@ -308,110 +443,158 @@ export default function AdminPortal() {
         
         {/* Global Notification Banner */}
         {notification && (
-          <div className={`alert-banner ${notification.type === 'error' ? 'alert-emergency' : 'alert-info'} animate-fade-in`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className={`alert-banner ${notification.type === 'error' ? 'alert-emergency' : 'alert-info'}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               {notification.type === 'error' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
               <span>{notification.message}</span>
             </div>
-            <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>
+            <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }} aria-label="Dismiss">
               <X size={16} />
             </button>
           </div>
         )}
 
-        {/* Tab Navigation Pill Bar */}
+        {/* Tab Navigation Bar */}
         <div style={{
           display: 'flex',
           gap: '0.5rem',
           backgroundColor: 'var(--bg-secondary)',
           padding: '0.35rem',
-          borderRadius: 'var(--radius-lg)',
+          borderRadius: 'var(--radius-md)',
           border: '1px solid var(--border-subtle)',
           width: 'fit-content',
           flexWrap: 'wrap'
-        }}>
+        }} role="tablist">
           <button
+            role="tab"
+            aria-selected={activeTab === 'overview'}
             onClick={() => setActiveTab('overview')}
             style={{
-              padding: '0.55rem 1.25rem',
-              borderRadius: 'var(--radius-md)',
+              padding: '0.5rem 1.15rem',
+              borderRadius: 'var(--radius-sm)',
               border: 'none',
               backgroundColor: activeTab === 'overview' ? 'var(--accent-primary)' : 'transparent',
               color: activeTab === 'overview' ? '#ffffff' : 'var(--text-secondary)',
               fontWeight: 600,
-              fontSize: '0.875rem',
+              fontSize: '0.85rem',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.45rem',
-              transition: 'all var(--transition-fast)'
+              gap: '0.45rem'
             }}
           >
-            <Activity size={16} />
-            <span>System Telemetry</span>
+            <Activity size={15} />
+            <span>Overview</span>
           </button>
 
           <button
+            role="tab"
+            aria-selected={activeTab === 'doctors'}
             onClick={() => setActiveTab('doctors')}
             style={{
-              padding: '0.55rem 1.25rem',
-              borderRadius: 'var(--radius-md)',
+              padding: '0.5rem 1.15rem',
+              borderRadius: 'var(--radius-sm)',
               border: 'none',
               backgroundColor: activeTab === 'doctors' ? 'var(--accent-primary)' : 'transparent',
               color: activeTab === 'doctors' ? '#ffffff' : 'var(--text-secondary)',
               fontWeight: 600,
-              fontSize: '0.875rem',
+              fontSize: '0.85rem',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.45rem',
-              transition: 'all var(--transition-fast)'
+              gap: '0.45rem'
             }}
           >
-            <Stethoscope size={16} />
-            <span>Manage Physicians ({doctors.length})</span>
+            <Stethoscope size={15} />
+            <span>Physicians ({doctors.length})</span>
           </button>
 
           <button
+            role="tab"
+            aria-selected={activeTab === 'appointments'}
             onClick={() => setActiveTab('appointments')}
             style={{
-              padding: '0.55rem 1.25rem',
-              borderRadius: 'var(--radius-md)',
+              padding: '0.5rem 1.15rem',
+              borderRadius: 'var(--radius-sm)',
               border: 'none',
               backgroundColor: activeTab === 'appointments' ? 'var(--accent-primary)' : 'transparent',
               color: activeTab === 'appointments' ? '#ffffff' : 'var(--text-secondary)',
               fontWeight: 600,
-              fontSize: '0.875rem',
+              fontSize: '0.85rem',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.45rem',
-              transition: 'all var(--transition-fast)'
+              gap: '0.45rem'
             }}
           >
-            <Calendar size={16} />
-            <span>All Appointments ({appointments.length})</span>
+            <Calendar size={15} />
+            <span>Appointments ({appointments.length})</span>
           </button>
 
           <button
+            role="tab"
+            aria-selected={activeTab === 'dataset'}
             onClick={() => setActiveTab('dataset')}
             style={{
-              padding: '0.55rem 1.25rem',
-              borderRadius: 'var(--radius-md)',
+              padding: '0.5rem 1.15rem',
+              borderRadius: 'var(--radius-sm)',
               border: 'none',
-              backgroundColor: activeTab === 'dataset' ? '#0284c7' : 'transparent',
+              backgroundColor: activeTab === 'dataset' ? 'var(--accent-primary)' : 'transparent',
               color: activeTab === 'dataset' ? '#ffffff' : 'var(--text-secondary)',
               fontWeight: 600,
-              fontSize: '0.875rem',
+              fontSize: '0.85rem',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.45rem',
-              transition: 'all var(--transition-fast)'
+              gap: '0.45rem'
             }}
           >
-            <Database size={16} />
-            <span>Dataset & ML Retraining</span>
+            <Database size={15} />
+            <span>Dataset & Ingestion</span>
+          </button>
+
+          <button
+            role="tab"
+            aria-selected={activeTab === 'models'}
+            onClick={() => setActiveTab('models')}
+            style={{
+              padding: '0.5rem 1.15rem',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              backgroundColor: activeTab === 'models' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'models' ? '#ffffff' : 'var(--text-secondary)',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.45rem'
+            }}
+          >
+            <History size={15} />
+            <span>Model Lifecycle (ADMIN-12..15)</span>
+          </button>
+
+          <button
+            role="tab"
+            aria-selected={activeTab === 'audit'}
+            onClick={() => setActiveTab('audit')}
+            style={{
+              padding: '0.5rem 1.15rem',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              backgroundColor: activeTab === 'audit' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'audit' ? '#ffffff' : 'var(--text-secondary)',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.45rem'
+            }}
+          >
+            <FileText size={15} />
+            <span>Audit Logs (ADMIN-10)</span>
           </button>
         </div>
 
@@ -419,46 +602,46 @@ export default function AdminPortal() {
         {/* TAB 1: OVERVIEW TELEMETRY */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'overview' && (
-          <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem' }}>
-              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.15rem' }}>
-                <div style={{ width: '48px', height: '48px', borderRadius: '12px', backgroundColor: 'var(--accent-primary-light)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Users size={24} />
+              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ width: '44px', height: '44px', borderRadius: '4px', backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Users size={22} />
                 </div>
                 <div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Registered Patients</div>
-                  <div style={{ fontSize: '1.65rem', fontWeight: 800 }}>{stats?.total_users ?? 0}</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700 }} className="tabular-nums">{stats?.total_users ?? 0}</div>
                 </div>
               </div>
 
-              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.15rem' }}>
-                <div style={{ width: '48px', height: '48px', borderRadius: '12px', backgroundColor: 'var(--accent-teal-light)', color: 'var(--accent-teal)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Stethoscope size={24} />
+              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ width: '44px', height: '44px', borderRadius: '4px', backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Stethoscope size={22} />
                 </div>
                 <div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Active Physicians</div>
-                  <div style={{ fontSize: '1.65rem', fontWeight: 800 }}>{stats?.total_doctors ?? doctors.length}</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700 }} className="tabular-nums">{stats?.total_doctors ?? doctors.length}</div>
                 </div>
               </div>
 
-              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.15rem' }}>
-                <div style={{ width: '48px', height: '48px', borderRadius: '12px', backgroundColor: 'var(--severity-mod-bg)', color: 'var(--severity-mod)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Calendar size={24} />
+              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ width: '44px', height: '44px', borderRadius: '4px', backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Calendar size={22} />
                 </div>
                 <div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total Bookings</div>
-                  <div style={{ fontSize: '1.65rem', fontWeight: 800 }}>{stats?.total_appointments ?? appointments.length}</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700 }} className="tabular-nums">{stats?.total_appointments ?? appointments.length}</div>
                 </div>
               </div>
 
-              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.15rem' }}>
-                <div style={{ width: '48px', height: '48px', borderRadius: '12px', backgroundColor: 'var(--accent-cyan-light)', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Database size={24} />
+              <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ width: '44px', height: '44px', borderRadius: '4px', backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Database size={22} />
                 </div>
                 <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>ML Samples / Classes</div>
-                  <div style={{ fontSize: '1.65rem', fontWeight: 800 }}>
-                    {datasetStatus?.total_samples ?? 1200} <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 500 }}>({datasetStatus?.classes_count ?? 24} classes)</span>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>ML Dataset Samples</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700 }} className="tabular-nums">
+                    {datasetStatus?.total_samples ?? 1200} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 400 }}>({datasetStatus?.classes_count ?? 24} classes)</span>
                   </div>
                 </div>
               </div>
@@ -468,32 +651,32 @@ export default function AdminPortal() {
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <Sparkles size={20} style={{ color: '#0284c7' }} />
-                  <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>AI Natural Language Engine Telemetry</h2>
+                  <Sparkles size={18} style={{ color: 'var(--accent-primary)' }} />
+                  <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Machine Learning Service Status</h2>
                 </div>
                 <span className="badge badge-mild">
-                  ● Service Status: Operational
+                  Operational (Active: {datasetStatus?.active_version || 'v1.0.0'})
                 </span>
               </div>
-              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                The on-device machine learning service is continuously evaluating symptom descriptions using TF-IDF feature extraction and Multinomial Logistic Regression.
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                On-device symptom classification engine utilizing TF-IDF feature extraction and Multinomial Logistic Regression with clinical thresholding.
               </p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '0.5rem' }}>
-                <div style={{ padding: '1rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Holdout Accuracy</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--severity-mild)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Holdout Accuracy</div>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 700 }} className="tabular-nums">
                     {datasetStatus?.ml_holdout_accuracy ? `${(datasetStatus.ml_holdout_accuracy * 100).toFixed(2)}%` : '96.67%'}
                   </div>
                 </div>
-                <div style={{ padding: '1rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Macro F1-Score</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--accent-primary)' }}>
+                <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Holdout Macro F1</div>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 700 }} className="tabular-nums">
                     {datasetStatus?.ml_holdout_macro_f1 ? `${(datasetStatus.ml_holdout_macro_f1 * 100).toFixed(2)}%` : '96.61%'}
                   </div>
                 </div>
-                <div style={{ padding: '1rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Training Dataset File</div>
-                  <div style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: '0.35rem' }}>
+                <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Ingested File</div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, marginTop: '0.25rem' }}>
                     Symptom2Disease.csv ({datasetStatus?.file_size_kb ?? 224} KB)
                   </div>
                 </div>
@@ -503,22 +686,22 @@ export default function AdminPortal() {
         )}
 
         {/* ------------------------------------------------------------- */}
-        {/* TAB 2: DOCTOR MANAGEMENT */}
+        {/* TAB 2: PHYSICIANS */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'doctors' && (
-          <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Physician Directory & Provisioning</h2>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Add new accredited doctors or remove inactive profiles.</p>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Credentialed Physicians</h2>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Manage medical providers with access to the Physician Portal.</p>
               </div>
               <button
                 onClick={() => setShowDoctorModal(true)}
                 className="btn btn-primary"
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
               >
                 <PlusCircle size={16} />
-                <span>Add New Physician</span>
+                <span>Add Physician</span>
               </button>
             </div>
 
@@ -526,54 +709,41 @@ export default function AdminPortal() {
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
                   <thead>
-                    <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Physician Name</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Specialty</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>NPI Number</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Email Address</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Bookings</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700, textAlign: 'right' }}>Actions</th>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-tertiary)' }}>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Name & NPI</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Specialty</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Email</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Linked Patients</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {doctors.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                          No physicians found. Add one above.
+                    {doctors.map((doc) => (
+                      <tr key={doc.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.85rem 1rem' }}>
+                          <div style={{ fontWeight: 600 }}>{doc.name}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{doc.npi_number || 'NPI pending'}</div>
+                        </td>
+                        <td style={{ padding: '0.85rem 1rem' }}>{doc.specialty || 'General Practice'}</td>
+                        <td style={{ padding: '0.85rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{doc.email}</td>
+                        <td style={{ padding: '0.85rem 1rem' }} className="tabular-nums">{doc.patient_count ?? 0} active</td>
+                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>
+                          <button
+                            onClick={() => handleRemoveDoctor(doc.id, doc.name)}
+                            className="btn btn-outline btn-sm"
+                            style={{ color: 'var(--severity-crit)', borderColor: 'var(--severity-crit-border)' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </td>
                       </tr>
-                    ) : (
-                      doctors.map((doc) => (
-                        <tr key={doc.id} style={{ borderBottom: '1px solid var(--border-light)', transition: 'background-color var(--transition-fast)' }}>
-                          <td style={{ padding: '1rem 1.25rem', fontWeight: 600 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                              <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'var(--accent-teal-light)', color: 'var(--accent-teal)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.75rem' }}>
-                                Dr
-                              </div>
-                              <span>{doc.name}</span>
-                            </div>
-                          </td>
-                          <td style={{ padding: '1rem 1.25rem' }}>
-                            <span className="badge badge-primary">{doc.specialty || 'General'}</span>
-                          </td>
-                          <td style={{ padding: '1rem 1.25rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>{doc.npi_number}</td>
-                          <td style={{ padding: '1rem 1.25rem', color: 'var(--text-secondary)' }}>{doc.email}</td>
-                          <td style={{ padding: '1rem 1.25rem' }}>
-                            <span className="badge badge-neutral">{doc.appointment_count || 0} visits</span>
-                          </td>
-                          <td style={{ padding: '1rem 1.25rem', textAlign: 'right' }}>
-                            <button
-                              onClick={() => handleRemoveDoctor(doc.id, doc.name)}
-                              className="btn btn-sm btn-danger"
-                              title="Delete Doctor Profile"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                            >
-                              <Trash2 size={14} />
-                              <span>Remove</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                    ))}
+                    {doctors.length === 0 && (
+                      <tr>
+                        <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          No physician records found.
+                        </td>
+                      </tr>
                     )}
                   </tbody>
                 </table>
@@ -583,85 +753,63 @@ export default function AdminPortal() {
         )}
 
         {/* ------------------------------------------------------------- */}
-        {/* TAB 3: APPOINTMENTS MANAGEMENT */}
+        {/* TAB 3: APPOINTMENTS */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'appointments' && (
-          <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Master Appointment Schedule</h2>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Inspect, reschedule, reassign physicians, or update clinical status for all patient visits.
-              </p>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Clinical Bookings</h2>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Master consultation schedule and physician reassignment.</p>
             </div>
 
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
                   <thead>
-                    <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Patient</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Assigned Physician</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Scheduled Date & Time</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Chief Complaint / Reason</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700 }}>Status</th>
-                      <th style={{ padding: '0.9rem 1.25rem', fontWeight: 700, textAlign: 'right' }}>Action</th>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-tertiary)' }}>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Date & Time</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Patient</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Physician</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Reason</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Status</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {appointments.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                          No appointments found.
+                    {appointments.map((appt) => (
+                      <tr key={appt.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.85rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
+                          {appt.scheduled_at ? new Date(appt.scheduled_at).toLocaleString() : 'Unscheduled'}
+                        </td>
+                        <td style={{ padding: '0.85rem 1rem' }}>
+                          <div style={{ fontWeight: 600 }}>{appt.patient_name || 'Patient'}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{appt.patient_email}</div>
+                        </td>
+                        <td style={{ padding: '0.85rem 1rem' }}>{appt.doctor_name || 'Unassigned'}</td>
+                        <td style={{ padding: '0.85rem 1rem' }}>{appt.reason || 'General Follow-up'}</td>
+                        <td style={{ padding: '0.85rem 1rem' }}>
+                          <span className={`badge ${appt.status === 'completed' ? 'badge-mild' : appt.status === 'cancelled' ? 'badge-crit' : 'badge-mod'}`}>
+                            {appt.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>
+                          <button
+                            onClick={() => handleOpenApptEdit(appt)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                          >
+                            <Edit3 size={13} />
+                            <span>Edit</span>
+                          </button>
                         </td>
                       </tr>
-                    ) : (
-                      appointments.map((appt) => {
-                        const statusBadge = appt.status === 'completed'
-                          ? 'badge-mild'
-                          : appt.status === 'cancelled'
-                          ? 'badge-critical'
-                          : 'badge-moderate';
-
-                        return (
-                          <tr key={appt.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                            <td style={{ padding: '1rem 1.25rem' }}>
-                              <div style={{ fontWeight: 600 }}>{appt.patient_name || 'Patient'}</div>
-                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{appt.patient_email}</div>
-                            </td>
-                            <td style={{ padding: '1rem 1.25rem' }}>
-                              <div style={{ fontWeight: 600, color: 'var(--accent-primary)' }}>
-                                {appt.assigned_doctor_name || appt.doctor_name || 'Unassigned Doctor'}
-                              </div>
-                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                {appt.assigned_doctor_specialty || appt.specialty || 'General'}
-                              </div>
-                            </td>
-                            <td style={{ padding: '1rem 1.25rem' }}>
-                              {appt.scheduled_at ? new Date(appt.scheduled_at).toLocaleString() : 'Not Set'}
-                            </td>
-                            <td style={{ padding: '1rem 1.25rem', maxWidth: '240px' }}>
-                              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {appt.reason || 'Routine consultation'}
-                              </div>
-                            </td>
-                            <td style={{ padding: '1rem 1.25rem' }}>
-                              <span className={`badge ${statusBadge}`} style={{ textTransform: 'capitalize' }}>
-                                {appt.status}
-                              </span>
-                            </td>
-                            <td style={{ padding: '1rem 1.25rem', textAlign: 'right' }}>
-                              <button
-                                onClick={() => handleOpenApptEdit(appt)}
-                                className="btn btn-secondary btn-sm"
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                              >
-                                <Edit3 size={13} />
-                                <span>Change</span>
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
+                    ))}
+                    {appointments.length === 0 && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          No clinical consultations found.
+                        </td>
+                      </tr>
                     )}
                   </tbody>
                 </table>
@@ -671,208 +819,388 @@ export default function AdminPortal() {
         )}
 
         {/* ------------------------------------------------------------- */}
-        {/* TAB 4: DATASET MANAGEMENT, VALIDATION & ML RETRAINING */}
+        {/* TAB 4: DATASET INGESTION & VALIDATION (ADMIN-11) */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'dataset' && (
-          <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>AI Disease Model Dataset & Training Center</h2>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Dataset Ingestion & Class Validation</h2>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Upload a verified symptom dataset (.csv) to dynamically retrain and deploy the on-device NLP disease classifier.
+                Upload candidate training corpora in CSV format. Schema and class balance are verified prior to pipeline execution.
               </p>
             </div>
 
-            {/* Current Dataset Metrics Card */}
-            <div className="card" style={{ background: 'linear-gradient(135deg, var(--bg-card) 0%, rgba(2, 132, 199, 0.08) 100%)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <FileSpreadsheet size={22} style={{ color: '#0284c7' }} />
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Active Dataset Summary</h3>
-                </div>
-                <span className="badge badge-primary">Symptom2Disease.csv</span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
-                <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Total Clinical Samples</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{datasetStatus?.total_samples ?? 1200}</div>
-                </div>
-                <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Distinct Disease Classes</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--accent-primary)' }}>{datasetStatus?.classes_count ?? 24}</div>
-                </div>
-                <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Validated Holdout Accuracy</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--severity-mild)' }}>
-                    {datasetStatus?.ml_holdout_accuracy ? `${(datasetStatus.ml_holdout_accuracy * 100).toFixed(2)}%` : '96.67%'}
-                  </div>
-                </div>
-                <div style={{ padding: '0.85rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>File Size</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{datasetStatus?.file_size_kb ?? 224} KB</div>
-                </div>
-              </div>
-
-              {datasetStatus?.classes?.length > 0 && (
-                <div style={{ marginTop: '1rem' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.45rem' }}>
-                    Recognized Disease Classes:
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                    {datasetStatus.classes.map((cls, idx) => (
-                      <span key={idx} className="badge badge-neutral" style={{ fontSize: '0.72rem' }}>
-                        {cls}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* ERROR ALERT MODAL / BANNER IF DATASET IS INVALID */}
             {datasetError && (
-              <div className="alert-banner alert-emergency animate-fade-in" style={{ border: '2px solid var(--severity-crit)', padding: '1.25rem' }}>
-                <AlertCircle size={24} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                  <div style={{ fontWeight: 800, fontSize: '0.95rem', letterSpacing: '-0.01em' }}>
-                    DATASET VALIDATION REJECTED
-                  </div>
-                  <div style={{ fontSize: '0.85rem', lineHeight: 1.45 }}>
-                    {datasetError}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', opacity: 0.9, marginTop: '0.25rem' }}>
-                    Please check the required CSV format below and ensure columns match <code>text</code> and <code>label</code>.
-                  </div>
-                </div>
+              <div className="alert-banner alert-emergency">
+                <AlertCircle size={18} />
+                <span>{datasetError}</span>
               </div>
             )}
 
-            {/* SUCCESS BANNER UPON VALIDATION & RETRAINING */}
-            {datasetSuccess && (
-              <div className="alert-banner alert-info animate-fade-in" style={{ border: '2px solid var(--accent-teal)', backgroundColor: 'var(--accent-teal-light)', color: 'var(--accent-teal)', padding: '1.25rem' }}>
-                <CheckCircle2 size={24} style={{ flexShrink: 0 }} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                  <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>
-                    DATASET VALIDATED & MODEL RETRAINED SUCCESSFULLY!
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
+              <div className="card">
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>Upload Candidate Dataset</h3>
+                <form onSubmit={handleDatasetUpload} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">Select .csv File (text, label)</label>
+                    <input
+                      type="file"
+                      accept=".csv"
+                      className="form-input"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          setDatasetFile(e.target.files[0]);
+                          setDatasetError('');
+                          setValidationReport(null);
+                        }
+                      }}
+                    />
                   </div>
-                  <div style={{ fontSize: '0.85rem' }}>
-                    Processed {datasetSuccess.validation?.total_samples} samples across {datasetSuccess.validation?.classes_count} disease classes.
-                  </div>
-                  {datasetSuccess.retrain?.metrics && (
-                    <div style={{ fontSize: '0.8rem', fontWeight: 600, marginTop: '0.2rem' }}>
-                      New Model Accuracy: {(datasetSuccess.retrain.metrics.holdout_accuracy * 100).toFixed(2)}% | Macro-F1: {(datasetSuccess.retrain.metrics.holdout_macro_f1 * 100).toFixed(2)}%
+
+                  {datasetFile && (
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        type="button"
+                        onClick={handleValidateDataset}
+                        disabled={datasetUploading}
+                        className="btn btn-secondary"
+                        style={{ flex: 1 }}
+                      >
+                        Validate Schema Only (ADMIN-11)
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={datasetUploading}
+                        className="btn btn-primary"
+                        style={{ flex: 1 }}
+                      >
+                        {datasetUploading ? 'Uploading...' : 'Upload & Trigger Job'}
+                      </button>
                     </div>
                   )}
+                </form>
+
+                {validationReport && (
+                  <div style={{ marginTop: '1.25rem', padding: '1rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem', color: 'var(--accent-primary)' }}>
+                      Validation Report (ADMIN-11):
+                    </div>
+                    <div style={{ fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <div>Total Rows: <span className="tabular-nums font-mono">{validationReport.total_rows ?? validationReport.rows_count}</span></div>
+                      <div>Distinct Classes: <span className="tabular-nums font-mono">{validationReport.classes_count ?? (validationReport.class_distribution ? Object.keys(validationReport.class_distribution).length : 0)}</span></div>
+                      <div>Status: <span className="badge badge-mild">Schema Valid</span></div>
+                    </div>
+                    {validationReport.class_distribution && (
+                      <div style={{ marginTop: '0.75rem', maxHeight: '160px', overflowY: 'auto' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.35rem' }}>Class Distribution:</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.35rem' }}>
+                          {Object.entries(validationReport.class_distribution).map(([cls, cnt]) => (
+                            <div key={cls} style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '3px' }}>
+                              <span style={{ fontWeight: 600 }}>{cls}:</span> <span className="tabular-nums">{cnt}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="card" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.5rem' }}>Dataset Schema Requirements</h3>
+                <ul style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  <li>File format: UTF-8 encoded comma-separated values (<code>.csv</code>).</li>
+                  <li>Header columns: exactly <code>text</code> and <code>label</code>.</li>
+                  <li>Minimum volume: at least 10 non-empty sample rows.</li>
+                  <li>Class diversity: minimum of 2 discrete classification targets.</li>
+                  <li>Clinical copy: natural patient symptom narratives without formatting markup.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 5: MODEL LIFECYCLE (ADMIN-12..15) */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'models' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>ML Model Lifecycle Governance</h2>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  Version registry, holdout metrics gating (ADMIN-13: Acc &ge; 0.80, F1 &ge; 0.75), and one-click rollback (ADMIN-14).
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  onClick={() => handleRollbackModel(null)}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                >
+                  <RotateCcw size={14} />
+                  <span>Rollback to Previous (ADMIN-14)</span>
+                </button>
+                <button
+                  onClick={loadModelRegistry}
+                  className="btn btn-secondary btn-sm"
+                >
+                  <RefreshCw size={14} className={modelsLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+
+            {retrainJob && (
+              <div className="card" style={{ borderLeft: '4px solid var(--accent-primary)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    {retrainPolling ? <RefreshCw size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>
+                        Async Retraining Job: <span className="font-mono">{retrainJob.id}</span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        Status: <span className="font-mono font-semibold">{retrainJob.status}</span> &bull; {retrainJob.message || 'Processing dataset...'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Upload Box & Requirements Guide */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
-              
-              {/* Upload Form */}
-              <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                <div>
-                  <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.5rem' }}>Upload New CSV Dataset</h3>
-                  <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
-                    Upload a verified CSV dataset to update the model. The dataset will be strictly validated before training is allowed.
-                  </p>
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-tertiary)' }}>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Version</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Status</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Holdout Acc</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Macro F1</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Gating Check</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Registered</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {models.map((mod) => {
+                      const isActive = mod.status === 'active' || mod.version === activeModelVersion;
+                      const acc = mod.metrics?.accuracy ?? mod.accuracy ?? 0;
+                      const f1 = mod.metrics?.macro_f1 ?? mod.macro_f1 ?? 0;
+                      const passesGate = acc >= 0.80 && f1 >= 0.75;
 
-                  <form onSubmit={handleDatasetUpload}>
-                    <div style={{
-                      border: '2px dashed var(--border-subtle)',
-                      borderRadius: 'var(--radius-lg)',
-                      padding: '2rem 1.5rem',
-                      textAlign: 'center',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      cursor: 'pointer',
-                      marginBottom: '1.25rem',
-                      transition: 'border-color var(--transition-fast)'
-                    }}
-                    onClick={() => document.getElementById('dataset-file-input').click()}
-                    >
-                      <Upload size={32} style={{ margin: '0 auto 0.75rem', color: '#0284c7' }} />
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '0.25rem' }}>
-                        {datasetFile ? datasetFile.name : 'Click to Browse or Drag & Drop Dataset (.CSV)'}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {datasetFile ? `${(datasetFile.size / 1024).toFixed(1)} KB selected` : 'Maximum file size: 25 MB'}
-                      </div>
-                      <input
-                        id="dataset-file-input"
-                        type="file"
-                        accept=".csv"
-                        style={{ display: 'none' }}
-                        onChange={(e) => {
-                          if (e.target.files?.[0]) {
-                            setDatasetFile(e.target.files[0]);
-                            setDatasetError('');
-                          }
-                        }}
-                      />
-                    </div>
+                      return (
+                        <tr key={mod.version} style={{ borderBottom: '1px solid var(--border-subtle)', backgroundColor: isActive ? 'var(--bg-tertiary)' : 'transparent' }}>
+                          <td style={{ padding: '0.85rem 1rem', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                            {mod.version}
+                            {isActive && <span className="badge badge-mild" style={{ marginLeft: '0.5rem' }}>Active</span>}
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            <span className={`badge ${isActive ? 'badge-mild' : mod.status === 'candidate' ? 'badge-mod' : 'badge-neutral'}`}>
+                              {mod.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem' }} className="tabular-nums font-mono">
+                            {(acc * 100).toFixed(2)}%
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem' }} className="tabular-nums font-mono">
+                            {(f1 * 100).toFixed(2)}%
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            {passesGate ? (
+                              <span style={{ color: 'var(--severity-mild)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Check size={14} /> Meets gates
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--severity-crit)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <AlertTriangle size={14} /> Below gate
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            {mod.registered_at ? new Date(mod.registered_at).toLocaleString() : 'Baseline'}
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>
+                            {!isActive && (
+                              <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                                <button
+                                  onClick={() => handleActivateModel(mod.version)}
+                                  disabled={!passesGate}
+                                  className="btn btn-secondary btn-sm"
+                                  title={passesGate ? 'Activate version' : 'Gating threshold not met'}
+                                >
+                                  Activate
+                                </button>
+                                <button
+                                  onClick={() => handleRollbackModel(mod.version)}
+                                  className="btn btn-outline btn-sm"
+                                  title="Rollback to this version"
+                                >
+                                  Rollback
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {models.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          No model versions recorded. (ADMIN-15)
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
 
-                    <button
-                      type="submit"
-                      disabled={datasetUploading || !datasetFile}
-                      className="btn btn-primary"
-                      style={{
-                        width: '100%',
-                        padding: '0.85rem',
-                        background: 'linear-gradient(135deg, #0284c7 0%, #4f46e5 100%)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '0.5rem'
-                      }}
-                    >
-                      {datasetUploading ? (
-                        <>
-                          <RefreshCw size={16} className="animate-spin" />
-                          <span>Validating & Retraining ML Model...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles size={16} />
-                          <span>Validate & Retrain Disease Model</span>
-                        </>
-                      )}
-                    </button>
-                  </form>
-                </div>
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 6: AUDIT LOG VIEWER (ADMIN-10) */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'audit' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Immutable System Audit Trail</h2>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Append-only log of patient, physician, administrative and lifecycle actions with metadata.
+              </p>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="card" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: '1 1 140px' }}>
+                <label className="form-label">Actor Type</label>
+                <select
+                  className="form-select"
+                  value={auditFilters.actor_type}
+                  onChange={(e) => setAuditFilters({ ...auditFilters, actor_type: e.target.value })}
+                >
+                  <option value="">All Actors</option>
+                  <option value="user">User / Patient</option>
+                  <option value="doctor">Physician</option>
+                  <option value="admin">Administrator</option>
+                  <option value="system">System Daemon</option>
+                </select>
               </div>
 
-              {/* Strict Dataset Format Requirements Guide */}
-              <div className="card" style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)' }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                  <FileText size={18} style={{ color: 'var(--accent-primary)' }} />
-                  Strict Schema & Format Requirements
-                </h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.85rem', lineHeight: 1.4 }}>
-                  The dataset parser strictly checks incoming files. Uploads failing any of the following criteria will trigger an automatic error alert:
-                </p>
-
-                <ul style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  <li><strong>File Format:</strong> Standard Comma-Separated Values (<code>.csv</code>) encoded in UTF-8.</li>
-                  <li><strong>Required Header Columns:</strong> Must include <code>text</code> (the free-text symptom description) and <code>label</code> (the target condition name).</li>
-                  <li><strong>Minimum Samples:</strong> Must contain at least <strong>10 valid data rows</strong>.</li>
-                  <li><strong>Multi-Class Diversity:</strong> Must span at least <strong>2 distinct disease classes</strong>.</li>
-                  <li><strong>Data Quality:</strong> Empty or corrupt rows exceeding threshold will be rejected.</li>
-                </ul>
-
-                <div style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>
-                    Sample Valid CSV Schema:
-                  </div>
-                  <pre style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text-primary)', overflowX: 'auto' }}>
-{`text,label
-"I have severe throbbing pain in my forehead and nausea",Migraine
-"Shortness of breath and wheezing at night",Bronchial Asthma
-"High fever, body chills, and fatigue since 3 days",Malaria`}
-                  </pre>
-                </div>
+              <div style={{ flex: '1 1 180px' }}>
+                <label className="form-label">Action Pattern</label>
+                <input
+                  type="text"
+                  placeholder="e.g. auth, triage, model"
+                  className="form-input"
+                  value={auditFilters.action}
+                  onChange={(e) => setAuditFilters({ ...auditFilters, action: e.target.value })}
+                />
               </div>
 
+              <div style={{ flex: '1 1 150px' }}>
+                <label className="form-label">Date From</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={auditFilters.date_from}
+                  onChange={(e) => setAuditFilters({ ...auditFilters, date_from: e.target.value })}
+                />
+              </div>
+
+              <div style={{ flex: '1 1 150px' }}>
+                <label className="form-label">Date To</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={auditFilters.date_to}
+                  onChange={(e) => setAuditFilters({ ...auditFilters, date_to: e.target.value })}
+                />
+              </div>
+
+              <button
+                onClick={() => {
+                  setAuditOffset(0);
+                  loadAuditLogs();
+                }}
+                className="btn btn-primary"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <Filter size={14} />
+                <span>Filter Logs</span>
+              </button>
+            </div>
+
+            {/* Audit Table */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-tertiary)' }}>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Timestamp</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Actor</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Action</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Target / Resource</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>IP Address</th>
+                      <th style={{ padding: '0.75rem 1rem', fontWeight: 600, color: 'var(--text-muted)' }}>Metadata</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditLogs.map((log) => (
+                      <tr key={log.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.75rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          {new Date(log.created_at || log.timestamp).toLocaleString()}
+                        </td>
+                        <td style={{ padding: '0.75rem 1rem' }}>
+                          <span className="badge badge-neutral font-mono">{log.actor_type || 'user'} #{log.actor_id ?? 'N/A'}</span>
+                        </td>
+                        <td style={{ padding: '0.75rem 1rem', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                          {log.action}
+                        </td>
+                        <td style={{ padding: '0.75rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
+                          {log.resource_type ? `${log.resource_type} #${log.resource_id ?? ''}` : '-'}
+                        </td>
+                        <td style={{ padding: '0.75rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          {log.ip_address || '-'}
+                        </td>
+                        <td style={{ padding: '0.75rem 1rem', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--text-secondary)' }} title={JSON.stringify(log.metadata || {})}>
+                          {log.metadata ? JSON.stringify(log.metadata) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                    {auditLogs.length === 0 && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          No audit log entries matching criteria.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination controls */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderTop: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-secondary)' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Showing <span className="tabular-nums font-mono">{auditLogs.length}</span> of <span className="tabular-nums font-mono">{auditTotal}</span> entries
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    disabled={auditOffset === 0 || auditLoading}
+                    onClick={() => setAuditOffset(Math.max(0, auditOffset - auditLimit))}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    disabled={auditOffset + auditLimit >= auditTotal || auditLoading}
+                    onClick={() => setAuditOffset(auditOffset + auditLimit)}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -886,14 +1214,14 @@ export default function AdminPortal() {
         <div className="modal-overlay" onClick={() => setShowDoctorModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ padding: '2rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <h2 style={{ fontSize: '1.35rem', fontWeight: 800 }}>Provision New Physician Account</h2>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Provision Physician Account</h2>
               <button onClick={() => setShowDoctorModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 <X size={20} />
               </button>
             </div>
 
             {doctorError && (
-              <div className="alert-banner alert-emergency mb-4" style={{ marginBottom: '1rem' }}>
+              <div className="alert-banner alert-emergency mb-4">
                 <AlertCircle size={16} />
                 <span style={{ fontSize: '0.825rem' }}>{doctorError}</span>
               </div>
@@ -993,14 +1321,14 @@ export default function AdminPortal() {
         <div className="modal-overlay" onClick={() => setSelectedAppt(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ padding: '2rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <h2 style={{ fontSize: '1.35rem', fontWeight: 800 }}>Modify Appointment Details</h2>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Modify Appointment Details</h2>
               <button onClick={() => setSelectedAppt(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 <X size={20} />
               </button>
             </div>
 
             {apptError && (
-              <div className="alert-banner alert-emergency mb-4" style={{ marginBottom: '1rem' }}>
+              <div className="alert-banner alert-emergency mb-4">
                 <AlertCircle size={16} />
                 <span style={{ fontSize: '0.825rem' }}>{apptError}</span>
               </div>

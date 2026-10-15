@@ -286,10 +286,26 @@ export const adminApi = {
   updateAppointment: (id, data) => adminApiClient.put(`/admin/appointments/${id}`, data),
   getDatasetStatus: () => adminApiClient.get('/admin/dataset/status'),
   getAuditLogs: (params) => adminApiClient.get('/admin/audit-logs', { params }),
+  validateDataset: (formData) =>
+    adminApiClient.post('/admin/dataset/validate', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
   uploadDataset: (formData) =>
     adminApiClient.post('/admin/dataset/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+  getRetrainStatus: (jobId) => adminApiClient.get(`/admin/dataset/retrain/${jobId}`),
+  listModels: (params) => adminApiClient.get('/admin/models', { params }),
+  activateModel: (data) => adminApiClient.post('/admin/models/activate', data),
+  rollbackModel: (data) => adminApiClient.post('/admin/models/rollback', data),
+};
+
+export const accountApi = {
+  exportData: () => api.get('/account/export'),
+  requestDeletion: () => api.post('/account/deletion-request'),
+  getDeletionStatus: () => api.get('/account/deletion-request'),
+  cancelDeletion: () => api.delete('/account/deletion-request'),
+  getAccessLog: () => api.get('/account/access-log'),
 };
 
 // SEC-16: attachments and reports are now served only through authenticated,

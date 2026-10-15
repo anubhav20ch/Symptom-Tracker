@@ -1,235 +1,369 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   User,
-  Heart,
-  Save,
-  Moon,
-  Sun,
-  ShieldCheck,
-  CheckCircle2,
+  Clock,
+  Key,
+  Download,
+  Trash2,
+  Eye,
+  CheckCircle,
   AlertCircle
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { useAuth } from '../context/AuthContext';
+import { accountApi } from '../api/client';
+import api from '../api/client';
 
 export default function Profile() {
-  const { user, updateProfile, darkMode, toggleDarkMode } = useAuth();
+  const { user, updateProfile, toggleDarkMode } = useAuth();
 
+  // Basic profile state
   const [name, setName] = useState(user?.name || '');
   const [age, setAge] = useState(user?.age ? String(user.age) : '');
   const [gender, setGender] = useState(user?.gender || 'Female');
-  const [userTier, setUserTier] = useState(user?.user_tier || 'clinical');
-  const [chronicConditions, setChronicConditions] = useState(() => {
-    if (Array.isArray(user?.chronic_conditions)) {
-      return user.chronic_conditions.join(', ');
-    }
-    return '';
-  });
-
+  const [timezone, setTimezone] = useState(user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e) => {
+  // Password change state (AUTH-15)
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passSaving, setPassSaving] = useState(false);
+  const [passSuccess, setPassSuccess] = useState('');
+  const [passError, setPassError] = useState('');
+
+  // Privacy & Data Subject Rights state (PRIV-2, PRIV-3, PRIV-4)
+  const [deletionStatus, setDeletionStatus] = useState(null);
+  const [accessLogs, setAccessLogs] = useState([]);
+  const [showAccessLogs, setShowAccessLogs] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    async function fetchPrivacyStatus() {
+      try {
+        const res = await accountApi.getDeletionStatus();
+        setDeletionStatus(res.data?.deletion_request || null);
+      } catch (_) {}
+    }
+    fetchPrivacyStatus();
+  }, []);
+
+  const handleProfileSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setSuccess('');
     setError('');
     try {
-      const parsedConditions = chronicConditions
-        .split(',')
-        .map((c) => c.trim())
-        .filter(Boolean);
-
       await updateProfile({
         name: name.trim(),
         age: age ? parseInt(age, 10) : null,
-        gender,
-        chronic_conditions: parsedConditions,
-        user_tier: userTier
+        gender
       });
 
-      setSuccess('Profile details and experience mode successfully updated!');
-      confetti({ particleCount: 40, spread: 50 });
+      // Update timezone (AUTH-18)
+      if (timezone) {
+        await api.put('/auth/timezone', { timezone });
+      }
+
+      setSuccess('Profile details and time zone updated.');
     } catch (err) {
-      setError('Failed to update profile');
+      setError(err.response?.data?.error?.message || 'Failed to update profile');
     } finally {
       setSaving(false);
     }
   };
 
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    setPassSaving(true);
+    setPassSuccess('');
+    setPassError('');
+    try {
+      await api.put('/auth/password', { currentPassword, newPassword });
+      setPassSuccess('Password updated successfully.');
+      setCurrentPassword('');
+      setNewPassword('');
+    } catch (err) {
+      setPassError(err.response?.data?.error?.message || 'Failed to update password');
+    } finally {
+      setPassSaving(false);
+    }
+  };
+
+  // PRIV-2: Machine-readable data export
+  const handleExportData = async () => {
+    try {
+      setExporting(true);
+      const res = await accountApi.exportData();
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `symptomlog_data_export_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Failed to export account data.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // PRIV-3: Request deletion
+  const handleRequestDeletion = async () => {
+    if (!window.confirm('Request account deletion? You will have a 24-hour grace period to cancel before permanent erasure.')) return;
+    try {
+      const res = await accountApi.requestDeletion();
+      setDeletionStatus(res.data?.deletion_request || { status: 'pending' });
+      setSuccess('Account deletion requested. You may cancel at any time within the grace window.');
+    } catch (err) {
+      setError(err.response?.data?.error?.message || 'Failed to request account deletion');
+    }
+  };
+
+  const handleCancelDeletion = async () => {
+    try {
+      await accountApi.cancelDeletion();
+      setDeletionStatus(null);
+      setSuccess('Account deletion request has been cancelled.');
+    } catch (err) {
+      setError(err.response?.data?.error?.message || 'Failed to cancel deletion request');
+    }
+  };
+
+  // PRIV-4: View access log
+  const handleToggleAccessLog = async () => {
+    if (!showAccessLogs) {
+      try {
+        const res = await accountApi.getAccessLog();
+        setAccessLogs(res.data?.access_log || []);
+      } catch (_) {}
+    }
+    setShowAccessLogs(!showAccessLogs);
+  };
+
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem', maxWidth: '700px', margin: '0 auto' }}>
-      {/* Header */}
+    <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div>
-        <h1 style={{ fontSize: '1.85rem', marginBottom: '0.35rem' }}>Account & Health Profile</h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.925rem' }}>
-          Manage your personal demographics, chronic conditions, and app appearance preferences.
+        <h1 style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>Account & privacy settings</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+          Manage your demographics, time zone, security credentials, and data subject rights.
         </p>
       </div>
 
       {success && (
-        <div className="alert-banner alert-info" style={{ backgroundColor: 'var(--accent-teal-light)', color: 'var(--accent-teal)' }}>
-          <CheckCircle2 size={18} />
-          <span>{success}</span>
+        <div className="panel" style={{ backgroundColor: 'var(--success-bg)', borderColor: 'var(--success-border)', color: 'var(--success-text)', fontSize: '0.85rem' }}>
+          {success}
         </div>
       )}
-
       {error && (
-        <div className="alert-banner alert-emergency">
-          <AlertCircle size={18} />
-          <span>{error}</span>
+        <div className="panel" style={{ backgroundColor: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger-text)', fontSize: '0.85rem' }}>
+          {error}
         </div>
       )}
 
-      {/* Main Settings Card */}
-      <div className="card" style={{ padding: '2rem' }}>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Full Name</label>
-            <input
-              type="text"
-              className="form-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
+      {/* Demographics & Timezone (AUTH-18) */}
+      <section className="panel" aria-labelledby="profile-heading">
+        <h2 id="profile-heading" style={{ fontSize: '1.15rem', marginBottom: '1rem' }}>Demographics & preferences</h2>
 
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Email Address (Read-Only)</label>
-            <input
-              type="email"
-              className="form-input"
-              value={user?.email || ''}
-              disabled
-              style={{ opacity: 0.7, cursor: 'not-allowed' }}
-            />
-          </div>
-
+        <form onSubmit={handleProfileSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Age</label>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="user-name">Full name *</label>
               <input
+                id="user-name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="user-email">Email (read-only)</label>
+              <input
+                id="user-email"
+                type="email"
+                value={user?.email || ''}
+                disabled
+                style={{ opacity: 0.7 }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="user-age">Age</label>
+              <input
+                id="user-age"
                 type="number"
-                min="1"
-                max="125"
-                className="form-input"
+                min="0"
+                max="130"
                 value={age}
                 onChange={(e) => setAge(e.target.value)}
               />
             </div>
 
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Gender</label>
-              <select
-                className="form-select"
-                value={gender}
-                onChange={(e) => setGender(e.target.value)}
-              >
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="user-gender">Gender</label>
+              <select id="user-gender" value={gender} onChange={(e) => setGender(e.target.value)}>
                 <option value="Female">Female</option>
                 <option value="Male">Male</option>
                 <option value="Non-Binary">Non-Binary</option>
-                <option value="Other">Other / Prefer not to say</option>
+                <option value="Prefer Not to Say">Prefer Not to Say</option>
               </select>
             </div>
-          </div>
 
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Chronic Health Conditions (Comma Separated)</label>
-            <input
-              type="text"
-              className="form-input"
-              placeholder="e.g. Asthma, Migraine with Aura, Hypertension"
-              value={chronicConditions}
-              onChange={(e) => setChronicConditions(e.target.value)}
-            />
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-              These chronic conditions inform the automated triage classification engine during symptom flare-ups.
-            </span>
-          </div>
-
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Account Experience Mode</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <div
-                onClick={() => setUserTier('clinical')}
-                style={{
-                  padding: '0.85rem 1rem',
-                  borderRadius: 'var(--radius-md)',
-                  border: userTier !== 'casual' ? '2px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                  backgroundColor: userTier !== 'casual' ? 'var(--accent-primary-light)' : 'var(--bg-tertiary)',
-                  cursor: 'pointer',
-                  transition: 'all var(--transition-fast)'
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: '0.15rem' }}>
-                  🩺 Full Clinical Patient
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Comprehensive 4-tier triage, physician appointments, and longitudinal PDF reports.
-                </div>
-              </div>
-
-              <div
-                onClick={() => setUserTier('casual')}
-                style={{
-                  padding: '0.85rem 1rem',
-                  borderRadius: 'var(--radius-md)',
-                  border: userTier === 'casual' ? '2px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                  backgroundColor: userTier === 'casual' ? 'var(--accent-primary-light)' : 'var(--bg-tertiary)',
-                  cursor: 'pointer',
-                  transition: 'all var(--transition-fast)'
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: '0.15rem' }}>
-                  ⚡ Casual Wellness Tracker
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  Streamlined quick logging, daily alarms, and lightweight symptom tracking.
-                </div>
-              </div>
+            {/* AUTH-18 Time Zone */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="user-tz">Profile time zone (AUTH-18)</label>
+              <input
+                id="user-tz"
+                type="text"
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                placeholder="e.g. Asia/Kolkata, UTC"
+              />
             </div>
           </div>
 
-          <div style={{ paddingTop: '1rem', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-              <ShieldCheck size={18} className="text-teal-600" />
-              <span>Data encrypted locally</span>
-            </div>
-
-            <button
-              type="submit"
-              disabled={saving}
-              className="btn btn-primary"
-            >
-              <Save size={16} />
-              {saving ? 'Saving Profile...' : 'Update Health Profile'}
-            </button>
-          </div>
+          <button type="submit" disabled={saving} className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>
+            {saving ? 'Saving...' : 'Save demographics'}
+          </button>
         </form>
-      </div>
+      </section>
 
-      {/* Appearance & Theme Card */}
-      <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.5rem 2rem' }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-primary)' }}>
-            Application Theme
+      {/* Change Password (AUTH-12, AUTH-15) */}
+      <section className="panel" aria-labelledby="security-heading">
+        <h2 id="security-heading" style={{ fontSize: '1.15rem', marginBottom: '1rem' }}>Change password</h2>
+
+        {passSuccess && (
+          <div style={{ padding: '0.5rem', backgroundColor: 'var(--success-bg)', color: 'var(--success-text)', borderRadius: 'var(--radius-sm)', marginBottom: '1rem', fontSize: '0.8rem' }}>
+            {passSuccess}
           </div>
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Toggle between clinical high-contrast light mode and soothing OLED dark mode
+        )}
+        {passError && (
+          <div style={{ padding: '0.5rem', backgroundColor: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: 'var(--radius-sm)', marginBottom: '1rem', fontSize: '0.8rem' }}>
+            {passError}
           </div>
+        )}
+
+        <form onSubmit={handlePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="curr-pass">Current password</label>
+              <input
+                id="curr-pass"
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="new-pass">New password (min 10 chars, letter + digit)</label>
+              <input
+                id="new-pass"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <button type="submit" disabled={passSaving} className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>
+            {passSaving ? 'Updating...' : 'Update password'}
+          </button>
+        </form>
+      </section>
+
+      {/* PRIV-1 to PRIV-4: Data Subject Rights & Privacy */}
+      <section className="panel" aria-labelledby="privacy-heading">
+        <h2 id="privacy-heading" style={{ fontSize: '1.15rem', marginBottom: '0.5rem' }}>
+          Data subject rights & portability (PRIV-1 .. PRIV-4)
+        </h2>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+          Manage your data export, inspect data access audit logs, or request account erasure.
+        </p>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+          {/* PRIV-2: Machine-readable JSON Export */}
+          <button
+            onClick={handleExportData}
+            disabled={exporting}
+            className="btn btn-secondary"
+          >
+            <Download size={15} aria-hidden="true" />
+            <span>{exporting ? 'Generating JSON...' : 'Export all data (JSON)'}</span>
+          </button>
+
+          {/* PRIV-4: Access log */}
+          <button
+            onClick={handleToggleAccessLog}
+            className="btn btn-secondary"
+          >
+            <Eye size={15} aria-hidden="true" />
+            <span>{showAccessLogs ? 'Hide access log' : 'View access log'}</span>
+          </button>
+
+          {/* PRIV-3: Request or Cancel Deletion */}
+          {deletionStatus?.status === 'pending' ? (
+            <button
+              onClick={handleCancelDeletion}
+              className="btn btn-secondary"
+              style={{ color: 'var(--primary)' }}
+            >
+              Cancel pending deletion request
+            </button>
+          ) : (
+            <button
+              onClick={handleRequestDeletion}
+              className="btn btn-secondary"
+              style={{ color: 'var(--danger-text)' }}
+            >
+              <Trash2 size={15} aria-hidden="true" />
+              <span>Request account deletion</span>
+            </button>
+          )}
         </div>
 
-        <button
-          onClick={toggleDarkMode}
-          className="btn btn-secondary"
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-        >
-          {darkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} />}
-          <span>{darkMode ? 'Switch to Light' : 'Switch to Dark'}</span>
-        </button>
-      </div>
+        {deletionStatus?.status === 'pending' && (
+          <div style={{ padding: '0.85rem', backgroundColor: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--danger-text)', marginBottom: '1rem' }}>
+            <strong>Account deletion pending:</strong> Requested on {new Date(deletionStatus.requested_at).toLocaleString('en-GB')}. Your account will be permanently erased once the 24-hour grace window elapses unless you click Cancel above.
+          </div>
+        )}
+
+        {/* PRIV-4: Access Log Table */}
+        {showAccessLogs && (
+          <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border-muted)', paddingTop: '1rem' }}>
+            <h3 style={{ fontSize: '0.95rem', marginBottom: '0.5rem' }}>Data access audit trail</h3>
+            {accessLogs.length === 0 ? (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No cross-ownership data accesses recorded yet.</p>
+            ) : (
+              <table className="clinical-table" style={{ fontSize: '0.8rem' }}>
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Accessor</th>
+                    <th>Action</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accessLogs.map((log, idx) => (
+                    <tr key={idx}>
+                      <td>{new Date(log.occurred_at).toLocaleString('en-GB')}</td>
+                      <td><strong>{log.accessor_type}</strong></td>
+                      <td>{log.action}</td>
+                      <td>{log.source}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

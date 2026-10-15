@@ -11,30 +11,17 @@ export default function Layout() {
 
   if (loading) {
     return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        backgroundColor: 'var(--bg-primary)'
-      }}>
-        <div style={{
+      <div
+        style={{
           display: 'flex',
-          flexDirection: 'column',
           alignItems: 'center',
-          gap: '1rem'
-        }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            border: '4px solid var(--accent-primary-light)',
-            borderTopColor: 'var(--accent-primary)',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite'
-          }} />
-          <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-            Loading SymptomLog...
-          </div>
+          justifyContent: 'center',
+          height: '100vh',
+          backgroundColor: 'var(--bg-canvas)'
+        }}
+      >
+        <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
+          Loading clinical record...
         </div>
       </div>
     );
@@ -45,13 +32,15 @@ export default function Layout() {
   }
 
   return (
-    <div className="app-container">
+    <div className="app-container" style={{ display: 'flex', minHeight: '100vh' }}>
       <Sidebar />
-      <div className="main-content">
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, paddingBottom: '70px' }}>
         <Navbar />
-        <main className="page-body">
-          <EmergencyBanner />
-          <Outlet />
+        <main tabIndex={-1} style={{ flex: 1, padding: '1.25rem 1rem' }}>
+          <div style={{ maxWidth: '1120px', margin: '0 auto', width: '100%' }}>
+            <EmergencyBanner />
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

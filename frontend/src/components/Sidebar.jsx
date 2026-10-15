@@ -4,90 +4,179 @@ import {
   Activity,
   PlusCircle,
   Clock,
+  Sparkles,
   Pill,
-  Bell,
   Calendar,
   FileText,
-  Sparkles,
   Share2,
-  User,
   LogOut,
-  Stethoscope
+  Moon,
+  Sun,
+  ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export default function Sidebar() {
-  const { user, logout } = useAuth();
+// UI-6: Left sidebar with exact labels at >=1024px and bottom tab bar below 1024px.
+const NAV_ITEMS = [
+  { to: '/dashboard', label: 'Overview', icon: Activity },
+  { to: '/log', label: 'Log a symptom', icon: PlusCircle },
+  { to: '/history', label: 'History', icon: Clock },
+  { to: '/insights', label: 'Insights', icon: Sparkles },
+  { to: '/medications', label: 'Medicines', icon: Pill },
+  { to: '/appointments', label: 'Appointments', icon: Calendar },
+  { to: '/reports', label: 'Reports', icon: FileText },
+  { to: '/caregiver', label: 'Sharing', icon: Share2 }
+];
 
-  const navItems = [
-    { to: '/dashboard', label: 'Dashboard', icon: Activity },
-    { to: '/log', label: 'Log Symptom', icon: PlusCircle, highlight: true },
-    { to: '/history', label: 'History & Timeline', icon: Clock },
-    { to: '/insights', label: 'AI Health Insights', icon: Sparkles },
-    { to: '/medications', label: 'Medications', icon: Pill },
-    { to: '/reminders', label: 'Reminders', icon: Bell },
-    { to: '/appointments', label: 'Doctor Visits', icon: Calendar },
-    { to: '/reports', label: 'Clinical PDF Export', icon: FileText },
-    { to: '/caregiver', label: 'Caregiver Sharing', icon: Share2 },
-    { to: '/profile', label: 'Profile & Settings', icon: User },
-  ];
+export default function Sidebar() {
+  const { user, logout, toggleDarkMode } = useAuth();
 
   return (
-    <aside style={{
-      width: '260px',
-      backgroundColor: 'var(--bg-secondary)',
-      borderRight: '1px solid var(--border-subtle)',
-      display: 'flex',
-      flexDirection: 'column',
-      flexShrink: 0,
-      height: '100vh',
-      position: 'sticky',
-      top: 0,
-      zIndex: 30,
-      transition: 'background-color var(--transition-normal), border-color var(--transition-normal)'
-    }}>
-      {/* Brand Header */}
-      <div style={{
-        padding: '1.4rem 1.25rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.85rem',
-        borderBottom: '1px solid var(--border-light)'
-      }}>
-        <div style={{
-          width: '36px',
-          height: '36px',
-          borderRadius: '10px',
-          background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+    <>
+      {/* Desktop Persistent Left Sidebar (>=1024px) */}
+      <aside
+        className="desktop-sidebar"
+        aria-label="Primary navigation"
+        style={{
+          width: '240px',
+          backgroundColor: 'var(--bg-surface)',
+          borderRight: '1px solid var(--border-default)',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#ffffff',
-          boxShadow: '0 4px 12px rgba(99, 102, 241, 0.35)',
-          flexShrink: 0
-        }}>
-          <Stethoscope size={20} strokeWidth={2.2} />
-        </div>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>
-            Symptom<span style={{ color: 'var(--accent-primary)' }}>Log</span>
+          flexDirection: 'column',
+          flexShrink: 0,
+          height: '100vh',
+          position: 'sticky',
+          top: 0,
+          zIndex: 40
+        }}
+      >
+        {/* Brand Header */}
+        <div
+          style={{
+            padding: '1.25rem 1.25rem 1rem',
+            borderBottom: '1px solid var(--border-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.65rem'
+          }}
+        >
+          <div
+            style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '4px',
+              backgroundColor: 'var(--primary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#FFFFFF'
+            }}
+          >
+            <Activity size={18} strokeWidth={2.2} />
           </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-            Health Intelligence
+          <div>
+            <div style={{ fontFamily: 'var(--font-serif)', fontWeight: 700, fontSize: '1.1rem', lineHeight: 1.1 }}>
+              SymptomLog
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', letterSpacing: '0.02em' }}>
+              Clinical Health Record
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Navigation Links */}
-      <nav style={{
-        flex: 1,
-        padding: '1.1rem 0.75rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.25rem',
-        overflowY: 'auto'
-      }}>
-        {navItems.map((item) => {
+        {/* Navigation List */}
+        <nav style={{ flex: 1, padding: '0.85rem 0.65rem', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+            {NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}
+                  style={({ isActive }) => ({
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    padding: '0.55rem 0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.9rem',
+                    fontWeight: isActive ? 600 : 500,
+                    textDecoration: 'none',
+                    color: isActive ? '#FFFFFF' : 'var(--text-primary)',
+                    backgroundColor: isActive ? 'var(--primary)' : 'transparent',
+                    border: '1px solid',
+                    borderColor: isActive ? 'var(--primary)' : 'transparent'
+                  })}
+                >
+                  <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </div>
+        </nav>
+
+        {/* User & Accessibility Controls Footer */}
+        <div
+          style={{
+            padding: '0.85rem 1rem',
+            borderTop: '1px solid var(--border-muted)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem'
+          }}
+        >
+          {user && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              Signed in as <strong style={{ color: 'var(--text-primary)' }}>{user.name || user.email}</strong>
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+            <button
+              onClick={toggleDarkMode}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.8rem' }}
+              title="Toggle color theme"
+              aria-label="Toggle light and dark mode"
+            >
+              {user?.dark_mode ? <Sun size={15} /> : <Moon size={15} />}
+              <span>Theme</span>
+            </button>
+            <button
+              onClick={logout}
+              className="btn btn-secondary"
+              style={{ padding: '0.35rem 0.6rem', fontSize: '0.8rem' }}
+              title="Sign out"
+              aria-label="Sign out of account"
+            >
+              <LogOut size={15} />
+              <span>Sign out</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Mobile Bottom Tab Bar (<1024px) (UI-6) */}
+      <nav
+        className="mobile-tab-bar"
+        aria-label="Mobile Navigation"
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: '60px',
+          backgroundColor: 'var(--bg-surface)',
+          borderTop: '1px solid var(--border-default)',
+          display: 'none',
+          alignItems: 'center',
+          justifyContent: 'space-around',
+          zIndex: 50,
+          padding: '0 0.5rem'
+        }}
+      >
+        {NAV_ITEMS.slice(0, 5).map((item) => {
           const Icon = item.icon;
           return (
             <NavLink
@@ -95,117 +184,34 @@ export default function Sidebar() {
               to={item.to}
               style={({ isActive }) => ({
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.62rem 0.85rem',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '0.875rem',
-                fontWeight: isActive ? 600 : 500,
+                justifyContent: 'center',
+                gap: '0.15rem',
                 textDecoration: 'none',
-                color: isActive ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                backgroundColor: isActive ? 'var(--accent-primary-light)' : 'transparent',
-                border: isActive ? '1px solid rgba(99, 102, 241, 0.2)' : '1px solid transparent',
-                transition: 'all var(--transition-fast)',
-                position: 'relative'
+                color: isActive ? 'var(--primary)' : 'var(--text-muted)',
+                fontSize: '0.7rem',
+                fontWeight: isActive ? 700 : 500
               })}
             >
-              <Icon size={18} strokeWidth={2} />
-              <span style={{ letterSpacing: '-0.01em' }}>{item.label}</span>
-              {item.highlight && (
-                <span style={{
-                  marginLeft: 'auto',
-                  fontSize: '0.65rem',
-                  backgroundColor: 'var(--accent-primary)',
-                  color: '#ffffff',
-                  padding: '0.12rem 0.45rem',
-                  borderRadius: 'var(--radius-full)',
-                  fontWeight: 700,
-                  letterSpacing: '0.04em'
-                }}>
-                  NEW
-                </span>
-              )}
+              <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
+              <span>{item.label}</span>
             </NavLink>
           );
         })}
       </nav>
 
-      {/* User Profile Footer */}
-      <div style={{
-        padding: '0.9rem 1rem',
-        borderTop: '1px solid var(--border-light)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '0.5rem',
-        backgroundColor: 'var(--bg-tertiary)'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', overflow: 'hidden' }}>
-          <div style={{
-            width: '32px',
-            height: '32px',
-            borderRadius: '50%',
-            backgroundColor: 'var(--accent-primary)',
-            color: '#ffffff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 700,
-            fontSize: '0.825rem',
-            flexShrink: 0,
-            boxShadow: '0 2px 6px rgba(99, 102, 241, 0.25)'
-          }}>
-            {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
-          </div>
-          <div style={{ overflow: 'hidden' }}>
-            <div style={{
-              fontSize: '0.825rem',
-              fontWeight: 600,
-              color: 'var(--text-primary)',
-              whiteSpace: 'nowrap',
-              textOverflow: 'ellipsis',
-              overflow: 'hidden',
-              letterSpacing: '-0.01em'
-            }}>
-              {user?.name || 'Patient User'}
-            </div>
-            <div style={{
-              fontSize: '0.7rem',
-              color: 'var(--text-muted)',
-              whiteSpace: 'nowrap',
-              textOverflow: 'ellipsis',
-              overflow: 'hidden'
-            }}>
-              {user?.email || 'patient@symptomlog.com'}
-            </div>
-          </div>
-        </div>
-        <button
-          onClick={logout}
-          title="Sign Out"
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-muted)',
-            padding: '0.4rem',
-            borderRadius: 'var(--radius-sm)',
-            display: 'flex',
-            alignItems: 'center',
-            transition: 'color var(--transition-fast), background-color var(--transition-fast)'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = 'var(--severity-crit)';
-            e.currentTarget.style.backgroundColor = 'var(--severity-crit-bg)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'var(--text-muted)';
-            e.currentTarget.style.backgroundColor = 'transparent';
-          }}
-        >
-          <LogOut size={16} />
-        </button>
-      </div>
-    </aside>
+      {/* Responsive media query styling */}
+      <style>{`
+        @media (max-width: 1023px) {
+          .desktop-sidebar {
+            display: none !important;
+          }
+          .mobile-tab-bar {
+            display: flex !important;
+          }
+        }
+      `}</style>
+    </>
   );
 }

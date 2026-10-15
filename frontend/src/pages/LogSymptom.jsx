@@ -1,1039 +1,517 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Sparkles,
-  PlusCircle,
-  Activity,
-  Upload,
+  ShieldAlert,
   AlertTriangle,
-  CheckCircle2,
+  Info,
+  CheckCircle,
   ThumbsUp,
   ThumbsDown,
   Calendar,
-  Clock,
-  FileText,
-  HelpCircle,
   ArrowRight,
-  Stethoscope,
-  Brain,
-  BookOpen,
-  ChevronDown,
-  ChevronUp,
-  Flame,
-  Zap,
-  Moon,
-  BatteryCharging,
-  Smile,
-  Frown,
-  Meh,
-  Copy,
-  Check,
-  ShieldCheck,
-  Info,
-  Sliders,
-  Send,
-  HeartPulse,
-  RefreshCw,
-  TrendingUp
+  Sparkles,
+  Edit2
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
-import { entriesApi, symptomsApi, nlpApi, feedbackApi } from '../api/client';
-import EmergencyBanner from '../components/EmergencyBanner';
-import { IDENTIFIABLE_DISEASES } from '../utils/identifiableDiseases';
+import { entriesApi, nlpApi, feedbackApi } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
-// Quick 1-Click Clinical Scenario Presets
-const QUICK_PRESETS = [
-  {
-    id: 'migraine',
-    label: 'Throbbing Migraine',
-    icon: '🧠',
-    text: "Severe throbbing migraine on the right side of my head, sharp pain with light sensitivity. Feeling down and exhausted.",
-    emotion: 2,
-    pain: 8,
-    energy: 2,
-    stress: 7,
-    symptom: 'Migraine',
-    location: 'Head & Brain',
-    category: 'Neurological'
-  },
-  {
-    id: 'chest_pain',
-    label: 'Chest Pressure & Tightness',
-    icon: '🫀',
-    text: "Intense crushing chest tightness radiating slightly, shortness of breath and high anxiety. Feeling terrified.",
-    emotion: 1,
-    pain: 9,
-    energy: 2,
-    stress: 10,
-    symptom: 'Chest Pain',
-    location: 'Cardiovascular / Heart',
-    category: 'Cardiovascular'
-  },
-  {
-    id: 'sore_throat',
-    label: 'Cold & Sore Throat',
-    icon: '🧣',
-    text: "Scratchy throat, mild dry cough, and sinus congestion for 2 days. Feeling sluggish but coping okay.",
-    emotion: 5,
-    pain: 4,
-    energy: 4,
-    stress: 3,
-    symptom: 'Sore Throat',
-    location: 'Eyes, ENT & Throat',
-    category: 'ENT'
-  },
-  {
-    id: 'acid_reflux',
-    label: 'Stomach Ache & GERD',
-    icon: '🔥',
-    text: "Burning sensation rising into upper abdomen and chest after spicy meal, moderate cramping.",
-    emotion: 4,
-    pain: 6,
-    energy: 5,
-    stress: 5,
-    symptom: 'Acid Reflux / GERD',
-    location: 'Upper Abdomen / Stomach',
-    category: 'Gastrointestinal'
-  },
-  {
-    id: 'back_pain',
-    label: 'Lumbar Lower Back Pain',
-    icon: '🦴',
-    text: "Stiff aching lower back pain after lifting boxes, difficult to bend over. Frustrated and tired.",
-    emotion: 3,
-    pain: 6,
-    energy: 4,
-    stress: 5,
-    symptom: 'Lower Back Pain',
-    location: 'Spine, Neck & Back',
-    category: 'Musculoskeletal'
-  },
-  {
-    id: 'routine_good',
-    label: 'Feeling Great / Routine Check',
-    icon: '✨',
-    text: "Slept 8 hours, feeling energetic, joyful, and healthy. Just checking in for daily telemetry.",
-    emotion: 9,
-    pain: 1,
-    energy: 9,
-    stress: 1,
-    symptom: 'General Vitality',
-    location: 'Whole Body / Systemic',
-    category: 'General'
-  }
+const BODY_REGIONS = [
+  { code: 'head_front', label: 'Head / Face', view: 'front' },
+  { code: 'neck_front', label: 'Neck (front)', view: 'front' },
+  { code: 'chest', label: 'Chest', view: 'front' },
+  { code: 'abdomen', label: 'Abdomen / Stomach', view: 'front' },
+  { code: 'pelvis_groin', label: 'Pelvis / Groin', view: 'front' },
+  { code: 'shoulder_left_front', label: 'Left Shoulder', view: 'front' },
+  { code: 'shoulder_right_front', label: 'Right Shoulder', view: 'front' },
+  { code: 'arm_left', label: 'Left Arm', view: 'front' },
+  { code: 'arm_right', label: 'Right Arm', view: 'front' },
+  { code: 'hand_left', label: 'Left Hand', view: 'front' },
+  { code: 'hand_right', label: 'Right Hand', view: 'front' },
+  { code: 'leg_left_front', label: 'Left Leg (front)', view: 'front' },
+  { code: 'leg_right_front', label: 'Right Leg (front)', view: 'front' },
+  { code: 'foot_left', label: 'Left Foot', view: 'front' },
+  { code: 'foot_right', label: 'Right Foot', view: 'front' },
+  { code: 'head_back', label: 'Back of Head', view: 'back' },
+  { code: 'neck_back', label: 'Neck (back)', view: 'back' },
+  { code: 'upper_back', label: 'Upper Back', view: 'back' },
+  { code: 'lower_back', label: 'Lower Back', view: 'back' },
+  { code: 'buttocks', label: 'Buttocks', view: 'back' },
+  { code: 'leg_left_back', label: 'Left Leg (back)', view: 'back' },
+  { code: 'leg_right_back', label: 'Right Leg (back)', view: 'back' },
+  { code: 'whole_body', label: 'Whole Body / Systemic', view: 'both' }
 ];
 
 export default function LogSymptom() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const followUpId = searchParams.get('follow_up');
 
-  // Natural Language Input State
-  const [userNarrative, setUserNarrative] = useState('');
-  const [analyzing, setAnalyzing] = useState(false);
-  const [error, setError] = useState('');
-
-  // Numerical Biomarkers (Scale: 1 to 10)
-  // Warriner / VAD Scale: 1 = Sad / Agony / Despair, 10 = Happy / Serene
-  const [emotionScore, setEmotionScore] = useState(5);
-  const [painSeverity, setPainSeverity] = useState(5);
-  const [energyLevel, setEnergyLevel] = useState(5);
-  const [stressLevel, setStressLevel] = useState(4);
-  const [sleepQuality, setSleepQuality] = useState(5);
-  const [functionalImpairment, setFunctionalImpairment] = useState(3);
-  const [durationDays, setDurationDays] = useState(1);
-  const [frequency30d, setFrequency30d] = useState(1);
-
-  // Clinical Metadata
+  // Form State
+  const [description, setDescription] = useState('');
   const [symptomName, setSymptomName] = useState('');
-  const [symptomCategory, setSymptomCategory] = useState('General');
-  const [bodyLocation, setBodyLocation] = useState('Whole Body / Systemic');
-  const [trigger, setTrigger] = useState('Mental Stress & Anxiety');
-  const [startedAt, setStartedAt] = useState(() => new Date().toISOString().slice(0, 16));
-  const [endedAt, setEndedAt] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [severity, setSeverity] = useState(5);
+  const [bodyLocation, setBodyLocation] = useState('');
+  const [bodyRegionCode, setBodyRegionCode] = useState('');
+  const [bodyMapView, setBodyMapView] = useState('front');
+  const [startedAt, setStartedAt] = useState(new Date().toISOString().slice(0, 16));
+  const [triggers, setTriggers] = useState('');
+  const [notes, setNotes] = useState('');
 
-  // Live AI & Numerical Model Analysis State
-  const [livePrediction, setLivePrediction] = useState(null);
-  const [modelAccuracy, setModelAccuracy] = useState(0.9912);
-  const [showAdvancedTuning, setShowAdvancedTuning] = useState(false);
-  const [diseaseDrawer, setDiseaseDrawer] = useState(false);
+  // UI-8: "What we picked up" side panel state
+  const [pickedUpChips, setPickedUpChips] = useState(null);
+  const [nlpLoading, setNlpLoading] = useState(false);
+  const analyzeTimer = useRef(null);
 
-  // Submission State
+  // Submission & UI-10 Classification Result State
   const [submitting, setSubmitting] = useState(false);
-  const [createdResult, setCreatedResult] = useState(null);
-  const [copiedSummary, setCopiedSummary] = useState(false);
-  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
-  const [feedbackComment, setFeedbackComment] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [result, setResult] = useState(null);
+  const [feedbackGiven, setFeedbackGiven] = useState(null);
 
-  // Debounced auto-analyze ref
-  const debounceTimerRef = useRef(null);
-
+  // UI-8: NLP auto-extraction debounced while typing
   useEffect(() => {
-    // Fetch model stats on load
-    nlpApi.getNumericalStats()
-      .then(res => {
-        if (res.data?.holdout_accuracy) setModelAccuracy(res.data.holdout_accuracy);
-      })
-      .catch(() => {});
-
-    const prefillVal = searchParams.get('prefill');
-    if (prefillVal) {
-      setUserNarrative(prefillVal);
-      runSmartAnalysis(prefillVal);
+    if (description.trim().length < 6) {
+      setPickedUpChips(null);
+      return;
     }
-  }, [searchParams]);
-
-  // Execute Numerical ML Smart Analysis
-  const runSmartAnalysis = async (textToAnalyze, manualOverrides = null) => {
-    const text = textToAnalyze || userNarrative;
-    if (!text || !text.trim()) return;
-
-    setAnalyzing(true);
-    setError('');
-
-    try {
-      const overrides = manualOverrides || {};
-      const res = await nlpApi.smartAnalyze(text, overrides);
-      const data = res.data?.analysis;
-
-      if (data) {
-        const nums = data.extracted_numbers || {};
-        const pred = data.prediction || {};
-
-        if (!manualOverrides) {
-          if (nums.emotion_score !== undefined) setEmotionScore(Math.round(nums.emotion_score));
-          if (nums.pain_severity !== undefined) setPainSeverity(Math.round(nums.pain_severity));
-          if (nums.energy_level !== undefined) setEnergyLevel(Math.round(nums.energy_level));
-          if (nums.stress_level !== undefined) setStressLevel(Math.round(nums.stress_level));
-          if (nums.sleep_quality !== undefined) setSleepQuality(Math.round(nums.sleep_quality));
-          if (nums.functional_impairment !== undefined) setFunctionalImpairment(Math.round(nums.functional_impairment));
-          if (nums.duration_days !== undefined) setDurationDays(nums.duration_days);
-          if (nums.frequency_30d !== undefined) setFrequency30d(nums.frequency_30d);
-
-          if (nums.inferred_symptom_name && !symptomName) setSymptomName(nums.inferred_symptom_name);
-          if (nums.inferred_category) setSymptomCategory(nums.inferred_category);
-          if (nums.inferred_body_location) setBodyLocation(nums.inferred_body_location);
+    clearTimeout(analyzeTimer.current);
+    analyzeTimer.current = setTimeout(async () => {
+      try {
+        setNlpLoading(true);
+        const res = await nlpApi.smartAnalyze(description);
+        const data = res.data;
+        if (data) {
+          setPickedUpChips({
+            symptom: data.symptom_extracted || data.matched_catalogue_symptom || 'Unspecified symptom',
+            location: data.body_location || '',
+            severity: data.severity_extracted || severity,
+            triggers: data.triggers_extracted || '',
+            confidence: data.confidence ? Math.round(data.confidence * 100) : 85
+          });
+          // Auto-fill form fields if not already manually typed
+          if (!symptomName && data.symptom_extracted) {
+            setSymptomName(data.symptom_extracted);
+          }
+          if (!bodyLocation && data.body_location) {
+            setBodyLocation(data.body_location);
+          }
+          if (data.severity_extracted) {
+            setSeverity(data.severity_extracted);
+          }
         }
-
-        setLivePrediction(pred);
-        if (data.holdout_model_accuracy) setModelAccuracy(data.holdout_model_accuracy);
-      }
-    } catch (err) {
-      console.warn('Smart analysis error:', err);
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  // Debounced input change
-  const handleNarrativeChange = (e) => {
-    const text = e.target.value;
-    setUserNarrative(text);
-
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    debounceTimerRef.current = setTimeout(() => {
-      if (text.trim().length >= 8) {
-        runSmartAnalysis(text);
+      } catch (err) {
+        // Non-blocking fallback
+      } finally {
+        setNlpLoading(false);
       }
     }, 600);
-  };
 
-  // Re-predict when user manually tweaks numerical sliders
-  const handleNumericalSliderChange = (param, value) => {
-    const updatedVal = parseFloat(value);
-    const overrides = {
-      emotion_score: param === 'emotion' ? updatedVal : emotionScore,
-      pain_severity: param === 'pain' ? updatedVal : painSeverity,
-      energy_level: param === 'energy' ? updatedVal : energyLevel,
-      stress_level: param === 'stress' ? updatedVal : stressLevel,
-      sleep_quality: param === 'sleep' ? updatedVal : sleepQuality,
-      functional_impairment: param === 'impairment' ? updatedVal : functionalImpairment,
-      duration_days: durationDays,
-      frequency_30d: frequency30d
-    };
+    return () => clearTimeout(analyzeTimer.current);
+  }, [description]);
 
-    if (param === 'emotion') setEmotionScore(updatedVal);
-    if (param === 'pain') setPainSeverity(updatedVal);
-    if (param === 'energy') setEnergyLevel(updatedVal);
-    if (param === 'stress') setStressLevel(updatedVal);
-    if (param === 'sleep') setSleepQuality(updatedVal);
-    if (param === 'impairment') setFunctionalImpairment(updatedVal);
-
-    runSmartAnalysis(userNarrative || 'Symptom episode check-in', overrides);
-  };
-
-  // Load a quick scenario preset
-  const applyPreset = (preset) => {
-    setUserNarrative(preset.text);
-    setEmotionScore(preset.emotion);
-    setPainSeverity(preset.pain);
-    setEnergyLevel(preset.energy);
-    setStressLevel(preset.stress);
-    setSymptomName(preset.symptom);
-    setBodyLocation(preset.location);
-    setSymptomCategory(preset.category);
-
-    runSmartAnalysis(preset.text, {
-      emotion_score: preset.emotion,
-      pain_severity: preset.pain,
-      energy_level: preset.energy,
-      stress_level: preset.stress
-    });
-  };
-
-  // Form Submission
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const finalSymptom = symptomName.trim() || livePrediction?.inferred_symptom_name || 'General Discomfort';
-
+    if (!symptomName.trim()) {
+      setErrorMsg('Please specify a symptom name.');
+      return;
+    }
+    setErrorMsg('');
     setSubmitting(true);
-    setError('');
 
     try {
       const payload = {
-        symptom_name: finalSymptom,
-        symptom_category: symptomCategory,
-        severity: parseInt(painSeverity, 10),
-        body_location: bodyLocation,
-        trigger: trigger,
-        description: userNarrative || `${finalSymptom} episode recorded via Numerical Triage Engine`,
-        started_at: new Date(startedAt).toISOString(),
-        ended_at: endedAt ? new Date(endedAt).toISOString() : null,
-        // Numerical Biomarkers
-        emotion_score: parseFloat(emotionScore),
-        energy_level: parseFloat(energyLevel),
-        stress_level: parseFloat(stressLevel),
-        sleep_quality: parseFloat(sleepQuality),
-        functional_impairment: parseFloat(functionalImpairment),
-        urgency_score: livePrediction?.urgency_score ? parseFloat(livePrediction.urgency_score) : 35.0
+        symptom_name: symptomName.trim(),
+        severity: Number(severity),
+        description: description.trim() || undefined,
+        body_location: bodyLocation.trim() || undefined,
+        body_region_code: bodyRegionCode || undefined,
+        started_at: startedAt ? new Date(startedAt).toISOString() : new Date().toISOString(),
+        triggers: triggers.trim() || undefined,
+        notes: notes.trim() || undefined,
+        follow_up_to_entry_id: followUpId ? Number(followUpId) : undefined
       };
 
       const res = await entriesApi.create(payload);
-      const createdEntry = res.data.entry;
-      const classification = res.data.classification;
-
-      // Attachment handling if file provided
-      if (selectedFile && createdEntry?.id) {
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        try {
-          await entriesApi.uploadAttachment(createdEntry.id, formData);
-        } catch (uploadErr) {
-          console.warn('Attachment upload note:', uploadErr);
-        }
-      }
-
-      setCreatedResult({
-        entry: createdEntry,
-        classification: classification,
-        prediction: livePrediction
-      });
-
-      confetti({
-        particleCount: 90,
-        spread: 75,
-        origin: { y: 0.6 }
-      });
+      setResult(res.data.entry || res.data);
     } catch (err) {
-      setError(err.response?.data?.error?.message || 'Failed to log symptom entry. Please try again.');
+      console.error('[Create Entry Error]:', err);
+      setErrorMsg(err.response?.data?.error?.message || 'We could not save this entry. Check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleFeedback = async (wasHelpful) => {
-    if (!createdResult?.entry?.id) return;
+  const handleFeedback = async (isHelpful) => {
+    if (!result?.id || feedbackGiven !== null) return;
     try {
       await feedbackApi.submit({
-        entry_id: createdResult.entry.id,
-        was_helpful: wasHelpful,
-        comment: feedbackComment
+        entryId: result.id,
+        isHelpful,
+        predictedClassification: result.classification_type || 'Routine Acute'
       });
-      setFeedbackSubmitted(true);
+      setFeedbackGiven(isHelpful);
     } catch (err) {
-      console.error('Feedback submission failed:', err);
+      console.error('[Feedback error]:', err);
     }
   };
 
-  // Helper labels & styling for Emotion (1 to 10)
-  const getEmotionDetails = (val) => {
-    if (val <= 2) return { label: 'Extreme Sadness / Agony / Despair', emoji: '😭', color: '#ef4444' };
-    if (val <= 4) return { label: 'Sad / Depressed / Distressed', emoji: '😢', color: '#f97316' };
-    if (val <= 6) return { label: 'Neutral / Coping / Flat', emoji: '😐', color: '#f59e0b' };
-    if (val <= 8) return { label: 'Calm / Relieved / Good', emoji: '🙂', color: '#3b82f6' };
-    return { label: 'Joyful / Happy / Optimal Wellbeing', emoji: '😄', color: '#10b981' };
-  };
+  // UI-10: Result screen once entry is logged
+  if (result) {
+    const tier = result.classification_type || 'Routine Acute';
+    const isUrgent = tier.toLowerCase().includes('urgent') || tier.toLowerCase().includes('emergency');
+    const isChronic = tier.toLowerCase().includes('chronic');
+    const isRecurring = tier.toLowerCase().includes('recurring');
 
-  const emotionInfo = getEmotionDetails(emotionScore);
+    let tierClass = 'tier-acute';
+    let Icon = CheckCircle;
+    if (isUrgent) {
+      tierClass = 'tier-urgent';
+      Icon = ShieldAlert;
+    } else if (isChronic) {
+      tierClass = 'tier-chronic';
+      Icon = AlertTriangle;
+    } else if (isRecurring) {
+      tierClass = 'tier-recurring';
+      Icon = Info;
+    }
 
-  // Helper labels for Pain (1 to 10)
-  const getPainDetails = (val) => {
-    if (val <= 3) return { label: 'Mild / Noticeable', color: '#10b981' };
-    if (val <= 6) return { label: 'Moderate / Distracting', color: '#f59e0b' };
-    if (val <= 8) return { label: 'Severe / Impairing', color: '#f97316' };
-    return { label: 'Critical / Excruciating Pain', color: '#ef4444' };
-  };
-
-  const painInfo = getPainDetails(painSeverity);
-
-  return (
-    <div className="animate-fade-in" style={{ maxWidth: '960px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '3rem' }}>
-      
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+    return (
+      <div style={{ maxWidth: '780px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <div style={{
-              width: '38px',
-              height: '38px',
-              borderRadius: '10px',
-              background: 'linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#ffffff'
-            }}>
-              <Brain size={22} />
-            </div>
-            <div>
-              <h1 style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>
-                Smart Symptom & Emotion Logger
-              </h1>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: '0.2rem 0 0 0' }}>
-                Powered by a <strong>Numerical Clinical Triage ML Dataset</strong> (Warriner Emotion Norms 1=Sad to 10=Happy + ESAS-r Pain Telemetry).
-              </p>
-            </div>
-          </div>
+          <h1 style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>Triage advisory summary</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            Your entry has been recorded in your clinical record with timestamp {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.
+          </p>
         </div>
 
-        {/* Model Accuracy Badge */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.6rem',
-          padding: '0.45rem 0.85rem',
-          backgroundColor: 'var(--bg-secondary)',
-          borderRadius: 'var(--radius-full)',
-          border: '1px solid var(--border-subtle)',
-          fontSize: '0.8rem',
-          color: 'var(--text-secondary)'
-        }}>
-          <ShieldCheck size={16} color="#10b981" />
-          <span>Numerical ML Accuracy: <strong style={{ color: '#10b981' }}>{(modelAccuracy * 100).toFixed(1)}%</strong></span>
-        </div>
-      </div>
-
-      {error && (
-        <div className="alert-banner alert-emergency">
-          <AlertTriangle size={18} />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* SUCCESS CARD */}
-      {createdResult ? (
-        <div className="card animate-fade-in" style={{ border: '2px solid var(--accent-primary)', padding: '2rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1.5rem' }}>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-              color: '#10b981',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
-              <CheckCircle2 size={28} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>Symptom & Emotion Logged Successfully!</h2>
-              <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>
-                Your numerical biomarkers were evaluated through the clinical classification engine.
-              </p>
-            </div>
+        {/* UI-10: Labelled panel with left rule and distinct icon shape (never color alone) */}
+        <section className={`panel ${tierClass}`} style={{ padding: '1.5rem' }} aria-labelledby="triage-result-heading">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+            <Icon size={26} aria-hidden="true" />
+            <h2 id="triage-result-heading" style={{ fontSize: '1.35rem', margin: 0 }}>
+              {tier}
+            </h2>
           </div>
 
-          {/* Triage Result Box */}
-          <div style={{
-            padding: '1.25rem',
-            backgroundColor: 'var(--bg-tertiary)',
-            borderRadius: 'var(--radius-lg)',
-            borderLeft: `5px solid ${painInfo.color}`,
-            marginBottom: '1.5rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.75rem'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--accent-primary)', letterSpacing: '0.05em' }}>
-                Classification: {createdResult.classification.classification_type.toUpperCase()}
-              </span>
-              <span className={`badge ${createdResult.classification.classification_type === 'urgent' ? 'badge-critical' : 'badge-primary'}`}>
-                Urgency Score: {createdResult.entry.urgency_score || 35}/100
-              </span>
-            </div>
-
-            <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {createdResult.classification.recommendation}
-            </div>
-
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              {createdResult.classification.reasoning}
-            </div>
-
-            {createdResult.classification.classification_type === 'urgent' && (
-              <div style={{ marginTop: '0.5rem' }}>
-                <EmergencyBanner />
-              </div>
-            )}
+          <div style={{ fontSize: '0.95rem', lineHeight: 1.5, marginBottom: '1rem' }}>
+            <strong>Clinical reason:</strong> {result.reasoning || 'Standard clinical threshold evaluation.'}
           </div>
 
-          {/* Biomarker Summary Pills */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-            gap: '0.75rem',
-            marginBottom: '1.5rem'
-          }}>
-            <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Emotion / Mood</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: emotionInfo.color }}>
-                {emotionInfo.emoji} {createdResult.entry.emotion_score}/10
-              </div>
-            </div>
-            <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pain Severity</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: painInfo.color }}>
-                {createdResult.entry.severity}/10
-              </div>
-            </div>
-            <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Energy Level</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#3b82f6' }}>
-                {createdResult.entry.energy_level}/10
-              </div>
-            </div>
-            <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Stress Level</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#f59e0b' }}>
-                {createdResult.entry.stress_level}/10
-              </div>
-            </div>
-          </div>
-
-          {/* Feedback prompt */}
-          {!feedbackSubmitted ? (
-            <div style={{ padding: '1rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem', border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: '0.88rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                Was this numerical assessment accurate to how you feel?
-              </div>
-              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => handleFeedback(true)}
-                  className="btn btn-secondary btn-sm"
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-                >
-                  <ThumbsUp size={15} /> Yes, Very Accurate
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleFeedback(false)}
-                  className="btn btn-secondary btn-sm"
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-                >
-                  <ThumbsDown size={15} /> Not Accurate
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div style={{ padding: '0.75rem 1rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem', fontSize: '0.85rem', fontWeight: 600 }}>
-              ✓ Thank you for your feedback! It feeds the model retraining dataset.
+          {result.recommendation && (
+            <div style={{ fontSize: '0.925rem', lineHeight: 1.5, marginBottom: '1rem' }}>
+              <strong>Recommended action:</strong> {result.recommendation}
             </div>
           )}
 
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+          {result.recommended_specialist && (
+            <div style={{ fontSize: '0.875rem', marginBottom: '1rem' }}>
+              <strong>Suggested specialist:</strong> {result.recommended_specialist}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            <span>Severity: {result.severity}/10</span>
+            <span>Triage version: {result.triage_version || '1.1.0'}</span>
+            <span>Rule: {result.triage_rule_id || 'ROUTINE_ACUTE'}</span>
+          </div>
+        </section>
+
+        {/* UI-10 / CLIN-4: Medical disclaimer & Hedged phrasing */}
+        <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          <strong>Medical disclaimer:</strong> Symptoms entered may be consistent with several conditions. {result.disclaimer || 'SymptomLog provides structured symptom tracking and advisory triage guidance. It is not a certified diagnostic device and does not replace emergency care.'}
+        </div>
+
+        {/* UI-10: Helpful / Not helpful feedback & Appointment booking */}
+        <div className="panel" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Was this guidance helpful?</span>
             <button
-              onClick={() => {
-                setCreatedResult(null);
-                setUserNarrative('');
-                setSymptomName('');
-                setLivePrediction(null);
-                setFeedbackSubmitted(false);
-              }}
-              className="btn btn-primary"
+              onClick={() => handleFeedback(true)}
+              className={`btn btn-secondary ${feedbackGiven === true ? 'btn-primary' : ''}`}
+              style={{ padding: '0.35rem 0.65rem' }}
+              aria-label="Mark guidance as helpful"
             >
-              <PlusCircle size={16} /> Log Another Entry
+              <ThumbsUp size={15} aria-hidden="true" />
+              <span>Yes</span>
             </button>
             <button
-              onClick={() => navigate('/history')}
-              className="btn btn-secondary"
+              onClick={() => handleFeedback(false)}
+              className={`btn btn-secondary ${feedbackGiven === false ? 'btn-primary' : ''}`}
+              style={{ padding: '0.35rem 0.65rem' }}
+              aria-label="Mark guidance as not helpful"
             >
-              View Symptom Timeline
+              <ThumbsDown size={15} aria-hidden="true" />
+              <span>No</span>
+            </button>
+            {feedbackGiven !== null && (
+              <span style={{ fontSize: '0.78rem', color: 'var(--success-text)' }}>Thank you for your feedback.</span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button onClick={() => navigate('/dashboard')} className="btn btn-secondary">
+              Back to overview
+            </button>
+            <button
+              onClick={() => navigate(`/appointments?symptom=${encodeURIComponent(result.symptom_name || '')}&specialist=${encodeURIComponent(result.recommended_specialist || '')}`)}
+              className="btn btn-primary"
+            >
+              <Calendar size={15} aria-hidden="true" />
+              <span>Book an appointment</span>
             </button>
           </div>
         </div>
-      ) : (
-        /* MAIN INTERACTIVE LOGGER */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      </div>
+    );
+  }
 
-          {/* HERO NATURAL LANGUAGE CARD */}
-          <div className="card" style={{
-            background: 'linear-gradient(145deg, var(--bg-card) 0%, rgba(79, 70, 229, 0.05) 100%)',
-            border: '1px solid var(--border-focus)',
-            padding: '1.75rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '1.25rem'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Sparkles size={20} className="text-indigo-600" />
-                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>
-                  How are you feeling right now?
-                </h2>
-              </div>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                Just type naturally — our numerical AI analyzes emotional state & severity automatically.
-              </span>
-            </div>
+  // Filter body regions for active view
+  const currentViewRegions = BODY_REGIONS.filter(
+    (r) => r.view === bodyMapView || r.view === 'both'
+  );
 
-            {/* Quick 1-Click Presets */}
-            <div>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Quick 1-Click Scenario Presets:
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {QUICK_PRESETS.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => applyPreset(p)}
-                    style={{
-                      padding: '0.45rem 0.8rem',
-                      borderRadius: 'var(--radius-full)',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border-subtle)',
-                      fontSize: '0.78rem',
-                      fontWeight: 600,
-                      color: 'var(--text-primary)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                      transition: 'all 0.2s'
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
-                    onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border-subtle)'}
-                  >
-                    <span>{p.icon}</span>
-                    <span>{p.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div>
+        <h1 style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>Log a symptom</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+          Describe what you are experiencing. Our clinical engine will extract key markers and provide triage guidance.
+        </p>
+      </div>
 
-            {/* Narrative Textarea */}
-            <div style={{ position: 'relative' }}>
-              <textarea
-                rows={4}
-                className="form-textarea"
-                style={{
-                  fontSize: '0.98rem',
-                  lineHeight: '1.6',
-                  padding: '1rem',
-                  borderRadius: 'var(--radius-lg)',
-                  border: '1px solid var(--border-focus)',
-                  backgroundColor: 'var(--bg-secondary)'
-                }}
-                placeholder="Example: I'm feeling so sad and frustrated today. My head is pounding on the right temple with a sharp throbbing pain around level 8. I can't sleep or work..."
-                value={userNarrative}
-                onChange={handleNarrativeChange}
-              />
-              {analyzing && (
-                <div style={{
-                  position: 'absolute',
-                  top: '12px',
-                  right: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  fontSize: '0.75rem',
-                  color: 'var(--accent-primary)',
-                  backgroundColor: 'var(--bg-card)',
-                  padding: '0.2rem 0.5rem',
-                  borderRadius: 'var(--radius-full)',
-                  border: '1px solid var(--border-subtle)'
-                }}>
-                  <RefreshCw size={12} className="animate-spin" />
-                  <span>Extracting Numerical Datapoints...</span>
-                </div>
-              )}
-            </div>
-
-            {/* TWO PRIMARY VISUAL METERS (EMOTION & PAIN) */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '1.25rem',
-              backgroundColor: 'var(--bg-secondary)',
-              padding: '1.25rem',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border-subtle)'
-            }}>
-              
-              {/* 1. EMOTION SCALE (Happy = 10, Sad = 1) */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span>Emotion / Affect Score</span>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>(Warriner Norm)</span>
-                  </label>
-                  <span style={{
-                    fontSize: '0.85rem',
-                    fontWeight: 800,
-                    color: emotionInfo.color,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.35rem'
-                  }}>
-                    <span style={{ fontSize: '1.2rem' }}>{emotionInfo.emoji}</span>
-                    <span>{emotionScore}/10</span>
-                  </span>
-                </div>
-
-                <div style={{ fontSize: '0.76rem', color: emotionInfo.color, fontWeight: 600 }}>
-                  {emotionInfo.label}
-                </div>
-
-                {/* Range Slider */}
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  step="1"
-                  value={emotionScore}
-                  onChange={(e) => handleNumericalSliderChange('emotion', e.target.value)}
-                  style={{
-                    width: '100%',
-                    accentColor: emotionInfo.color,
-                    cursor: 'pointer'
-                  }}
-                />
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  <span>1: Sad / Agony 😭</span>
-                  <span>5: Neutral 😐</span>
-                  <span>10: Happy / Joyful 😄</span>
-                </div>
-              </div>
-
-              {/* 2. PAIN SEVERITY SCALE (1 to 10) */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span>Physical Pain Severity</span>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>(ESAS-r)</span>
-                  </label>
-                  <span style={{
-                    fontSize: '0.85rem',
-                    fontWeight: 800,
-                    color: painInfo.color
-                  }}>
-                    {painSeverity}/10
-                  </span>
-                </div>
-
-                <div style={{ fontSize: '0.76rem', color: painInfo.color, fontWeight: 600 }}>
-                  {painInfo.label}
-                </div>
-
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  step="1"
-                  value={painSeverity}
-                  onChange={(e) => handleNumericalSliderChange('pain', e.target.value)}
-                  style={{
-                    width: '100%',
-                    accentColor: painInfo.color,
-                    cursor: 'pointer'
-                  }}
-                />
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  <span>1: Minimal</span>
-                  <span>5: Moderate</span>
-                  <span>10: Excruciating</span>
-                </div>
-              </div>
-
-            </div>
-
-            {/* LIVE PREDICTION & CLINICAL REASONING CARD */}
-            {livePrediction && (
-              <div className="animate-fade-in" style={{
-                padding: '1.25rem',
-                backgroundColor: 'var(--bg-tertiary)',
-                borderRadius: 'var(--radius-lg)',
-                borderLeft: `5px solid ${painInfo.color}`,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.65rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <HeartPulse size={18} color="var(--accent-primary)" />
-                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-primary)', textTransform: 'uppercase' }}>
-                      Automated Numerical Triage Assessment
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span className={`badge ${livePrediction.classification_type === 'urgent' ? 'badge-critical' : 'badge-primary'}`}>
-                      {livePrediction.classification_type.toUpperCase()}
-                    </span>
-                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-                      Risk Index: {livePrediction.urgency_score}/100
-                    </span>
-                  </div>
-                </div>
-
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {livePrediction.recommendation}
-                </div>
-
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                  {livePrediction.clinical_reasoning}
-                </div>
-
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                  {livePrediction.disclaimer}
-                </div>
-              </div>
-            )}
-
-            {/* OPTIONAL EXPANDABLE FINE-TUNING DRAWER */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowAdvancedTuning(!showAdvancedTuning)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-secondary)',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  padding: 0
-                }}
-              >
-                <Sliders size={14} />
-                <span>{showAdvancedTuning ? 'Hide Biomarker Fine-Tuning' : 'Fine-Tune Energy, Stress & Clinical Tags (Optional)'}</span>
-                {showAdvancedTuning ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
-
-              {showAdvancedTuning && (
-                <div className="animate-fade-in" style={{
-                  marginTop: '1rem',
-                  padding: '1.25rem',
-                  backgroundColor: 'var(--bg-secondary)',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border-subtle)',
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                  gap: '1rem'
-                }}>
-                  {/* Energy Slider */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontWeight: 700 }}>
-                      <span>Energy / Vitality</span>
-                      <span>{energyLevel}/10</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="1"
-                      max="10"
-                      value={energyLevel}
-                      onChange={(e) => handleNumericalSliderChange('energy', e.target.value)}
-                    />
-                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>1=Bedridden, 10=High Energy</span>
-                  </div>
-
-                  {/* Stress Slider */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontWeight: 700 }}>
-                      <span>Stress / Anxiety</span>
-                      <span>{stressLevel}/10</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="1"
-                      max="10"
-                      value={stressLevel}
-                      onChange={(e) => handleNumericalSliderChange('stress', e.target.value)}
-                    />
-                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>1=Calm, 10=Panic/Crisis</span>
-                  </div>
-
-                  {/* Sleep Slider */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontWeight: 700 }}>
-                      <span>Sleep Quality</span>
-                      <span>{sleepQuality}/10</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="1"
-                      max="10"
-                      value={sleepQuality}
-                      onChange={(e) => handleNumericalSliderChange('sleep', e.target.value)}
-                    />
-                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>1=Insomnia, 10=Restful 8h</span>
-                  </div>
-
-                  {/* Primary Symptom Field */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                    <label style={{ fontSize: '0.78rem', fontWeight: 700 }}>Primary Symptom Name</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="e.g. Migraine, Chest Pain..."
-                      value={symptomName}
-                      onChange={(e) => setSymptomName(e.target.value)}
-                      style={{ fontSize: '0.82rem', padding: '0.45rem' }}
-                    />
-                  </div>
-
-                  {/* Body Location */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                    <label style={{ fontSize: '0.78rem', fontWeight: 700 }}>Body Location</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="e.g. Head & Brain, Chest, Stomach..."
-                      value={bodyLocation}
-                      onChange={(e) => setBodyLocation(e.target.value)}
-                      style={{ fontSize: '0.82rem', padding: '0.45rem' }}
-                    />
-                  </div>
-
-                  {/* Trigger */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                    <label style={{ fontSize: '0.78rem', fontWeight: 700 }}>Suspected Trigger</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="e.g. Lack of sleep, Stress, Diet..."
-                      value={trigger}
-                      onChange={(e) => setTrigger(e.target.value)}
-                      style={{ fontSize: '0.82rem', padding: '0.45rem' }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* SUBMIT BUTTON */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '0.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                Logging will calculate your 30-day longitudinal frequency and alert doctors if recurring.
-              </div>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="btn btn-primary"
-                style={{
-                  padding: '0.75rem 1.85rem',
-                  fontSize: '0.95rem',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Send size={16} />
-                <span>{submitting ? 'Recording Entry...' : 'Save & Log Episode'}</span>
-              </button>
-            </div>
-
-          </div>
-
-          {/* BROWSE 24 CONDITIONS DRAWER TOGGLE */}
-          <div className="card" style={{ padding: '1rem 1.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <BookOpen size={18} color="var(--accent-primary)" />
-                <span style={{ fontSize: '0.88rem', fontWeight: 700 }}>
-                  Browse 24 ML-Identifiable Clinical Conditions (Symptom2Disease)
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDiseaseDrawer(!diseaseDrawer)}
-                className="btn btn-secondary btn-sm"
-                style={{ fontSize: '0.75rem' }}
-              >
-                {diseaseDrawer ? 'Hide Diseases' : 'Show 24 Diseases'}
-              </button>
-            </div>
-
-            {diseaseDrawer && (
-              <div className="animate-fade-in" style={{
-                marginTop: '1rem',
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
-                gap: '0.5rem',
-                maxHeight: '220px',
-                overflowY: 'auto'
-              }}>
-                {IDENTIFIABLE_DISEASES.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => {
-                      const sampleText = `I have been experiencing ${d.keySymptoms.join(', ')}. Feeling down and uncomfortable.`;
-                      setUserNarrative(sampleText);
-                      setSymptomName(d.name);
-                      setSymptomCategory(d.category);
-                      runSmartAnalysis(sampleText);
-                    }}
-                    style={{
-                      textAlign: 'left',
-                      padding: '0.5rem 0.65rem',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-subtle)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.45rem'
-                    }}
-                  >
-                    <span style={{ fontSize: '1.1rem' }}>{d.icon}</span>
-                    <div style={{ overflow: 'hidden' }}>
-                      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {d.name}
-                      </div>
-                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-                        {d.category}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
+      {errorMsg && (
+        <div role="alert" className="panel" style={{ backgroundColor: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger-text)' }}>
+          {errorMsg}
         </div>
       )}
 
+      {/* 2-column layout: Single-column intake form (UI-8) + "What we picked up" side panel */}
+      <div className="overview-grid">
+        {/* Main Intake Form */}
+        <form onSubmit={handleSubmit} className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Free Text Description */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor="symptom-description">
+              What are you experiencing? *
+            </label>
+            <span className="form-hint" id="desc-hint">
+              Type naturally (e.g., "Severe throbbing headache behind right eye with nausea for 2 days").
+            </span>
+            <textarea
+              id="symptom-description"
+              rows={4}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Describe your symptoms in your own words..."
+              aria-describedby="desc-hint"
+              required
+            />
+          </div>
+
+          {/* Symptom Name & Severity */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="symptom-name">Symptom name *</label>
+              <input
+                id="symptom-name"
+                type="text"
+                value={symptomName}
+                onChange={(e) => setSymptomName(e.target.value)}
+                placeholder="e.g. Migraine, Chest Pain"
+                required
+              />
+            </div>
+
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="severity-range">
+                Severity: <strong>{severity}/10</strong>
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.35rem' }}>
+                <input
+                  id="severity-range"
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={severity}
+                  onChange={(e) => setSeverity(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--primary)' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* UI-9: Body-map control (front/back toggle, labelled region buttons + accessible text list) */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <label htmlFor="body-map-view">Body region</label>
+              <div style={{ display: 'flex', gap: '0.35rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setBodyMapView('front')}
+                  className={`btn ${bodyMapView === 'front' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}
+                >
+                  Front view
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBodyMapView('back')}
+                  className={`btn ${bodyMapView === 'back' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}
+                >
+                  Back view
+                </button>
+              </div>
+            </div>
+
+            {/* Visual Region Button Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
+                gap: '0.4rem',
+                marginBottom: '0.75rem',
+                padding: '0.75rem',
+                backgroundColor: 'var(--bg-surface-subtle)',
+                border: '1px solid var(--border-muted)',
+                borderRadius: 'var(--radius-sm)'
+              }}
+              role="group"
+              aria-label={`Body regions: ${bodyMapView} view`}
+            >
+              {currentViewRegions.map((region) => (
+                <button
+                  key={region.code}
+                  type="button"
+                  onClick={() => {
+                    setBodyRegionCode(region.code);
+                    if (!bodyLocation) setBodyLocation(region.label);
+                  }}
+                  className={`btn ${bodyRegionCode === region.code ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '0.4rem 0.5rem', textAlign: 'center', whiteSpace: 'normal', height: '100%' }}
+                >
+                  {region.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Accessible Text Fallback Dropdown (UI-9) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <span className="form-hint">Text list alternative:</span>
+              <select
+                id="body-map-view"
+                value={bodyRegionCode}
+                onChange={(e) => {
+                  setBodyRegionCode(e.target.value);
+                  const found = BODY_REGIONS.find((r) => r.code === e.target.value);
+                  if (found && !bodyLocation) setBodyLocation(found.label);
+                }}
+                aria-label="Select body region from text list"
+              >
+                <option value="">-- Select body region (optional) --</option>
+                {BODY_REGIONS.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.label} ({r.view})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Onset Date & Triggers */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="started-at">Onset date/time (ENTRY-9)</label>
+              <input
+                id="started-at"
+                type="datetime-local"
+                value={startedAt}
+                onChange={(e) => setStartedAt(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="triggers">Known triggers</label>
+              <input
+                id="triggers"
+                type="text"
+                value={triggers}
+                onChange={(e) => setTriggers(e.target.value)}
+                placeholder="e.g. Stress, Bright lights, Cold weather"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="btn btn-primary"
+            style={{ marginTop: '0.5rem', padding: '0.75rem' }}
+          >
+            {submitting ? 'Analyzing & recording entry...' : 'Save entry & view triage guidance'}
+          </button>
+        </form>
+
+        {/* UI-8: "What we picked up" Side Panel */}
+        <aside style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <section className="panel" aria-labelledby="picked-up-heading">
+            <h2 id="picked-up-heading" style={{ fontSize: '1.05rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Sparkles size={16} aria-hidden="true" style={{ color: 'var(--primary)' }} />
+              <span>What we picked up</span>
+            </h2>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+              Real-time clinical markers extracted from your description. Click any chip to edit.
+            </p>
+
+            {nlpLoading ? (
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', padding: '1rem 0' }}>
+                Analyzing text...
+              </div>
+            ) : !pickedUpChips ? (
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                Start typing your description to see extracted chips for symptom, location, severity, and triggers.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 0.65rem', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)' }}>
+                  <div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>Symptom</span>
+                    <strong style={{ fontSize: '0.875rem' }}>{pickedUpChips.symptom}</strong>
+                  </div>
+                  <span className="chip" style={{ fontSize: '0.72rem' }}>
+                    {pickedUpChips.confidence}% conf
+                  </span>
+                </div>
+
+                {pickedUpChips.location && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 0.65rem', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)' }}>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>Location</span>
+                      <strong style={{ fontSize: '0.875rem' }}>{pickedUpChips.location}</strong>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 0.65rem', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)' }}>
+                  <div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>Detected Severity</span>
+                    <strong style={{ fontSize: '0.875rem' }}>{pickedUpChips.severity}/10</strong>
+                  </div>
+                </div>
+
+                {pickedUpChips.triggers && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 0.65rem', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)' }}>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>Triggers</span>
+                      <strong style={{ fontSize: '0.875rem' }}>{pickedUpChips.triggers}</strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

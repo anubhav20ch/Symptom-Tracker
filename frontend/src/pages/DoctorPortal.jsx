@@ -3,20 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import {
   Stethoscope,
   LogOut,
+  Calendar,
   Clock,
   User,
-  CheckCircle2,
-  XCircle,
-  Send,
-  ShieldCheck,
+  CheckCircle,
+  FileText,
   Pill,
-  Bell,
-  Lock,
-  PlusCircle,
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  RefreshCw
+  Send,
+  AlertCircle
 } from 'lucide-react';
 import { doctorApi } from '../api/client';
 
@@ -24,21 +18,17 @@ export default function DoctorPortal() {
   const navigate = useNavigate();
   const [doctor, setDoctor] = useState(null);
   const [appointments, setAppointments] = useState([]);
+  const [selectedAppt, setSelectedAppt] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [noteDrafts, setNoteDrafts] = useState({});
-  const [savingId, setSavingId] = useState(null);
-  const [reviewMessage, setReviewMessage] = useState({});
 
-  // Active Prescribing State per appointment
-  const [prescribeOpenId, setPrescribeOpenId] = useState(null);
+  // Review & Prescribe form states
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [statusAction, setStatusAction] = useState('confirmed');
   const [medName, setMedName] = useState('');
   const [medDosage, setMedDosage] = useState('');
-  const [medFrequency, setMedFrequency] = useState('Twice daily');
-  const [medDuration, setMedDuration] = useState('7');
-  const [medReminderTime, setMedReminderTime] = useState('08:00');
-  const [medInstructions, setMedInstructions] = useState('');
-  const [prescribing, setPrescribing] = useState(false);
-  const [prescribeMessage, setPrescribeMessage] = useState({});
+  const [medFrequency, setMedFrequency] = useState('Once Daily');
+  const [actionSuccess, setActionSuccess] = useState('');
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     const stored = localStorage.getItem('symptomlog_doctor');
@@ -54,412 +44,344 @@ export default function DoctorPortal() {
     try {
       setLoading(true);
       const res = await doctorApi.getAppointments();
-      setAppointments(res.data.appointments || []);
+      const list = (res.data?.appointments || []).sort(
+        (a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)
+      );
+      setAppointments(list);
+      if (list.length > 0 && !selectedAppt) {
+        setSelectedAppt(list[0]);
+        setReviewNotes(list[0].doctor_notes || '');
+      }
     } catch (err) {
       if (err.response?.status === 401 || err.response?.status === 403) {
         handleLogout();
       }
-      console.error('Failed to load physician appointments:', err);
     } finally {
       setLoading(false);
     }
   };
 
   const handleLogout = async () => {
-    try { await doctorApi.logout(); } catch (e) { /* ignore */ }
-    localStorage.removeItem('symptomlog_doctor_token');
+    try {
+      await doctorApi.logout();
+    } catch (_) {}
     localStorage.removeItem('symptomlog_doctor');
     navigate('/doctor/login', { replace: true });
   };
 
-  const handleReview = async (id, status) => {
-    setSavingId(id);
-    setReviewMessage((prev) => ({ ...prev, [id]: null }));
-    try {
-      const res = await doctorApi.reviewAppointment(id, {
-        status,
-        doctor_review_notes: noteDrafts[id] !== undefined ? noteDrafts[id] : undefined
-      });
-      setReviewMessage((prev) => ({
-        ...prev,
-        [id]: {
-          type: 'success',
-          text: status === 'completed'
-            ? '✓ Consultation completed! E-prescribing privileges are now locked.'
-            : status === 'cancelled'
-            ? 'Appointment marked as cancelled.'
-            : status === 'scheduled'
-            ? 'Appointment re-opened as active (scheduled).'
-            : 'Clinical evaluation notes updated successfully.'
-        }
-      }));
-      await loadAppointments();
-    } catch (err) {
-      setReviewMessage((prev) => ({
-        ...prev,
-        [id]: {
-          type: 'error',
-          text: err.response?.data?.error?.message || 'Failed to submit review'
-        }
-      }));
-    } finally {
-      setSavingId(null);
-    }
+  const handleSelectAppt = (appt) => {
+    setSelectedAppt(appt);
+    setReviewNotes(appt.doctor_notes || '');
+    setActionSuccess('');
+    setActionError('');
   };
 
-  const handlePrescribe = async (apptId) => {
-    if (!medName.trim() || !medDosage.trim()) {
-      setPrescribeMessage({ [apptId]: { type: 'error', text: 'Medication name and dosage are required.' } });
-      return;
-    }
-
-    setPrescribing(true);
-    setPrescribeMessage({});
-
+  const handleSaveReview = async () => {
+    if (!selectedAppt) return;
     try {
-      const res = await doctorApi.prescribeMedication(apptId, {
-        name: medName,
-        dosage: medDosage,
-        frequency: medFrequency,
-        duration_days: parseInt(medDuration, 10) || 7,
-        reminder_time: medReminderTime,
-        instructions: medInstructions
+      setActionError('');
+      await doctorApi.reviewAppointment(selectedAppt.id, {
+        notes: reviewNotes,
+        status: statusAction
       });
-
-      setPrescribeMessage({
-        [apptId]: {
-          type: 'success',
-          text: res.data?.message || `Prescribed ${medName} with auto-expiring ${medDuration}-day alarm schedule.`
-        }
-      });
-
-      // Clear form
-      setMedName('');
-      setMedDosage('');
-      setMedInstructions('');
-      setTimeout(() => setPrescribeOpenId(null), 2500);
+      setActionSuccess('Appointment review updated successfully.');
       loadAppointments();
     } catch (err) {
-      setPrescribeMessage({
-        [apptId]: {
-          type: 'error',
-          text: err.response?.data?.error?.message || 'Failed to prescribe medication.'
-        }
-      });
-    } finally {
-      setPrescribing(false);
+      setActionError(err.response?.data?.error?.message || 'Failed to update appointment review');
     }
   };
 
-  if (!doctor) return null;
+  const handlePrescribe = async (e) => {
+    e.preventDefault();
+    if (!selectedAppt || !medName.trim() || !medDosage.trim()) return;
+    try {
+      setActionError('');
+      await doctorApi.prescribe({
+        patient_id: selectedAppt.user_id,
+        appointment_id: selectedAppt.id,
+        name: medName.trim(),
+        dosage: medDosage.trim(),
+        frequency: medFrequency,
+        instructions: reviewNotes || undefined
+      });
+      setActionSuccess(`Prescription for ${medName} issued and linked to patient record.`);
+      setMedName('');
+      setDosage('');
+      loadAppointments();
+    } catch (err) {
+      setActionError(err.response?.data?.error?.message || 'Failed to issue prescription');
+    }
+  };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-primary)' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-canvas)', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{
-        padding: '1.25rem 2rem',
-        borderBottom: '1px solid var(--border-subtle)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        backgroundColor: 'var(--bg-secondary)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 30,
-        backdropFilter: 'var(--glass-blur)'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{
-            width: '38px', height: '38px', borderRadius: '10px',
-            background: 'linear-gradient(135deg, #0d9488 0%, #4f46e5 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
-            boxShadow: '0 4px 10px rgba(13, 148, 136, 0.3)'
-          }}>
-            <ShieldCheck size={20} strokeWidth={2.2} />
-          </div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: '1.05rem', letterSpacing: '-0.02em' }}>Physician Consultation Portal</div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>{doctor.name} • {doctor.specialty}</div>
-          </div>
+      <header
+        style={{
+          height: '56px',
+          backgroundColor: 'var(--bg-surface)',
+          borderBottom: '1px solid var(--border-default)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 1.5rem',
+          position: 'sticky',
+          top: 0,
+          zIndex: 30
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+          <Stethoscope size={20} style={{ color: 'var(--primary)' }} aria-hidden="true" />
+          <strong style={{ fontSize: '1rem' }}>SymptomLog Physician Workstation</strong>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            ({doctor?.name || doctor?.email} — {doctor?.specialty || 'General Practitioner'})
+          </span>
         </div>
-        <button onClick={handleLogout} className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-          <LogOut size={14} /> <span>Sign Out</span>
+
+        <button
+          onClick={handleLogout}
+          className="btn btn-secondary"
+          style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
+        >
+          <LogOut size={14} aria-hidden="true" />
+          <span>Sign out</span>
         </button>
-      </div>
+      </header>
 
-      <div style={{ maxWidth: '1050px', margin: '0 auto', padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        <div>
-          <h1 style={{ fontSize: '1.65rem', marginBottom: '0.3rem', fontWeight: 800, letterSpacing: '-0.025em' }}>
-            Patient Clinical Consultations
-          </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-            Review longitudinal symptom histories, prescribe medications with auto-expiring alarms, and record clinical notes.
-          </p>
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-muted)' }}>
-            <div style={{
-              width: '32px', height: '32px', border: '3px solid var(--border-subtle)',
-              borderTopColor: 'var(--accent-teal)', borderRadius: '50%', animation: 'spin 0.8s linear infinite',
-              margin: '0 auto 1rem'
-            }} />
-            <span>Loading patient queue...</span>
+      {/* UI-14: Three-Pane Layout: Worklist | Appointment Detail | Patient Summary Timeline */}
+      <div
+        style={{
+          flex: 1,
+          display: 'grid',
+          gridTemplateColumns: '320px minmax(360px, 1fr) 340px',
+          height: 'calc(100vh - 56px)',
+          overflow: 'hidden'
+        }}
+      >
+        {/* Pane 1: Worklist View (DOC-11) */}
+        <section
+          style={{
+            borderRight: '1px solid var(--border-default)',
+            backgroundColor: 'var(--bg-surface)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflowY: 'auto'
+          }}
+          aria-label="Physician appointment worklist"
+        >
+          <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-muted)', backgroundColor: 'var(--bg-surface-subtle)' }}>
+            <h2 style={{ fontSize: '1rem', margin: 0 }}>Upcoming Worklist ({appointments.length})</h2>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Sorted chronologically</span>
           </div>
-        ) : appointments.length === 0 ? (
-          <div className="card" style={{ textAlign: 'center', padding: '3rem 1.5rem', color: 'var(--text-muted)' }}>
-            <Stethoscope size={40} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-            <p style={{ fontWeight: 600 }}>No appointments currently assigned to your queue</p>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {appointments.map((appt) => {
-              const isActive = appt.status === 'scheduled';
-              const isCompleted = appt.status === 'completed';
-              const isCancelled = appt.status === 'cancelled';
 
-              return (
-                <div key={appt.id} className="card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {/* Patient Header */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                      <div style={{
-                        width: '36px', height: '36px', borderRadius: '50%',
-                        backgroundColor: 'var(--accent-primary-light)', color: 'var(--accent-primary)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700
-                      }}>
-                        {appt.patient_name ? appt.patient_name.charAt(0) : 'P'}
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: '1rem' }}>{appt.patient_name}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {appt.patient_age ? `${appt.patient_age} yrs • ` : ''} {appt.patient_gender || 'Patient'}
-                        </div>
-                      </div>
+          {loading ? (
+            <div style={{ padding: '1.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading worklist...</div>
+          ) : appointments.length === 0 ? (
+            <div style={{ padding: '1.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              No appointments currently assigned within your active practice window.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {appointments.map((appt) => {
+                const isSelected = selectedAppt?.id === appt.id;
+                return (
+                  <div
+                    key={appt.id}
+                    onClick={() => handleSelectAppt(appt)}
+                    style={{
+                      padding: '0.85rem 1rem',
+                      borderBottom: '1px solid var(--border-muted)',
+                      cursor: 'pointer',
+                      backgroundColor: isSelected ? 'var(--primary-subtle)' : 'transparent',
+                      borderLeft: isSelected ? '4px solid var(--primary)' : '4px solid transparent'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.2rem' }}>
+                      <strong style={{ fontSize: '0.9rem' }}>{appt.patient_name || `Patient #${appt.user_id}`}</strong>
+                      <span className="chip" style={{ fontSize: '0.68rem' }}>{appt.status}</span>
                     </div>
-                    <span className={`badge ${isCompleted ? 'badge-mild' : isCancelled ? 'badge-critical' : 'badge-primary'}`} style={{ textTransform: 'capitalize' }}>
-                      {appt.status}
-                    </span>
-                  </div>
-
-                  {/* Scheduled Date */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.825rem', color: 'var(--text-secondary)' }}>
-                    <Clock size={15} />
-                    <span>Scheduled for: {new Date(appt.scheduled_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                  </div>
-
-                  {/* Linked Symptom Entry */}
-                  {appt.entry_symptom_name && (
-                    <div style={{
-                      padding: '0.75rem 1rem',
-                      backgroundColor: 'var(--bg-tertiary)',
-                      borderRadius: 'var(--radius-md)',
-                      fontSize: '0.825rem',
-                      borderLeft: '3px solid var(--accent-primary)'
-                    }}>
-                      <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                        Linked Symptom Log: {appt.entry_symptom_name} (Severity: {appt.entry_severity}/10)
-                      </div>
-                      {appt.entry_description && (
-                        <div style={{ color: 'var(--text-secondary)', marginTop: '0.25rem', lineHeight: 1.4 }}>
-                          "{appt.entry_description}"
-                        </div>
-                      )}
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                      {new Date(appt.scheduled_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })},{' '}
+                      {new Date(appt.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
-                  )}
-
-                  {appt.notes && (
-                    <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
-                      Patient pre-visit notes: "{appt.notes}"
-                    </p>
-                  )}
-
-                  {/* ----------------------------------------------------------- */}
-                  {/* PRESCRIBE MEDICATION & SCHEDULE ALARM SECTION */}
-                  {/* ----------------------------------------------------------- */}
-                  <div style={{
-                    padding: '1rem 1.15rem',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: isActive ? 'var(--bg-tertiary)' : 'rgba(15, 23, 42, 0.03)',
-                    border: '1px solid var(--border-subtle)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Pill size={17} style={{ color: 'var(--accent-teal)' }} />
-                        <span style={{ fontWeight: 700, fontSize: '0.875rem' }}>
-                          Prescribe Medication & Auto-Expiring Alarm Schedule
-                        </span>
-                      </div>
-
-                      {isActive ? (
-                        <button
-                          type="button"
-                          onClick={() => setPrescribeOpenId(prescribeOpenId === appt.id ? null : appt.id)}
-                          className="btn btn-secondary btn-sm"
-                          style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-                        >
-                          {prescribeOpenId === appt.id ? <ChevronUp size={14} /> : <PlusCircle size={14} />}
-                          <span>{prescribeOpenId === appt.id ? 'Close Panel' : 'Prescribe & Schedule'}</span>
-                        </button>
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                          <Lock size={13} />
-                          <span>Privileges Locked (Session {appt.status})</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {!isActive && (
-                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                        🔒 Notice: Modification privileges for this patient's medication and alarm schedules are locked because this appointment is no longer active.
-                      </p>
-                    )}
-
-                    {/* Prescribe Form (Active Appointments Only) */}
-                    {isActive && prescribeOpenId === appt.id && (
-                      <div className="animate-fade-in" style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px dashed var(--border-subtle)' }}>
-                        {prescribeMessage[appt.id] && (
-                          <div className={`alert-banner ${prescribeMessage[appt.id].type === 'error' ? 'alert-emergency' : 'alert-info'} mb-3`} style={{ marginBottom: '0.85rem' }}>
-                            {prescribeMessage[appt.id].type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
-                            <span style={{ fontSize: '0.8rem' }}>{prescribeMessage[appt.id].text}</span>
-                          </div>
-                        )}
-
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-                          <div className="form-group" style={{ marginBottom: '0.5rem' }}>
-                            <label className="form-label">Medication Name</label>
-                            <input
-                              type="text"
-                              className="form-input"
-                              placeholder="e.g. Sumatriptan, Amoxicillin"
-                              value={medName}
-                              onChange={(e) => setMedName(e.target.value)}
-                            />
-                          </div>
-
-                          <div className="form-group" style={{ marginBottom: '0.5rem' }}>
-                            <label className="form-label">Dosage</label>
-                            <input
-                              type="text"
-                              className="form-input"
-                              placeholder="e.g. 50mg, 500mg"
-                              value={medDosage}
-                              onChange={(e) => setMedDosage(e.target.value)}
-                            />
-                          </div>
-
-                          <div className="form-group" style={{ marginBottom: '0.5rem' }}>
-                            <label className="form-label">Frequency</label>
-                            <select
-                              className="form-select"
-                              value={medFrequency}
-                              onChange={(e) => setMedFrequency(e.target.value)}
-                            >
-                              <option value="Once daily">Once daily</option>
-                              <option value="Twice daily">Twice daily (Morning & Night)</option>
-                              <option value="Three times daily">Three times daily</option>
-                              <option value="As needed (PRN)">As needed (PRN)</option>
-                            </select>
-                          </div>
-
-                          <div className="form-group" style={{ marginBottom: '0.5rem' }}>
-                            <label className="form-label">Course Duration (Auto-Expiry)</label>
-                            <select
-                              className="form-select"
-                              value={medDuration}
-                              onChange={(e) => setMedDuration(e.target.value)}
-                            >
-                              <option value="3">3 Days (Short Course)</option>
-                              <option value="5">5 Days</option>
-                              <option value="7">7 Days (1 Week Course)</option>
-                              <option value="10">10 Days</option>
-                              <option value="14">14 Days (2 Weeks)</option>
-                              <option value="30">30 Days (1 Month)</option>
-                              <option value="90">90 Days (Chronic Regimen)</option>
-                            </select>
-                          </div>
-
-                          <div className="form-group" style={{ marginBottom: '0.5rem' }}>
-                            <label className="form-label">Daily Alarm Chime Time</label>
-                            <input
-                              type="time"
-                              className="form-input"
-                              value={medReminderTime}
-                              onChange={(e) => setMedReminderTime(e.target.value)}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="form-group" style={{ marginTop: '0.5rem', marginBottom: '0.75rem' }}>
-                          <label className="form-label">Prescription & Alarm Instructions</label>
-                          <input
-                            type="text"
-                            className="form-input"
-                            placeholder="e.g. Take with food. The alarm will automatically expire after 7 days."
-                            value={medInstructions}
-                            onChange={(e) => setMedInstructions(e.target.value)}
-                          />
-                        </div>
-
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                          <button
-                            type="button"
-                            onClick={() => handlePrescribe(appt.id)}
-                            disabled={prescribing}
-                            className="btn btn-primary btn-sm"
-                            style={{ background: 'linear-gradient(135deg, #0d9488 0%, #4f46e5 100%)' }}
-                          >
-                            <Bell size={14} />
-                            <span>{prescribing ? 'Scheduling...' : `Prescribe & Set ${medDuration}-Day Auto-Alarm`}</span>
-                          </button>
-                        </div>
+                    {appt.symptom_name && (
+                      <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                        Chief complaint: <em>{appt.symptom_name}</em>
                       </div>
                     )}
                   </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
-                  {/* Clinical Review Notes */}
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Clinical Consultation Review (Visible to Patient)</label>
-                    <textarea
-                      rows={2}
-                      className="form-textarea"
-                      placeholder={appt.doctor_review_notes || 'Enter clinical evaluation notes or treatment advice...'}
-                      defaultValue={appt.doctor_review_notes || ''}
-                      onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [appt.id]: e.target.value }))}
-                    />
-                  </div>
+        {/* Pane 2: Appointment Detail & Clinical Action */}
+        <section
+          style={{
+            padding: '1.5rem',
+            overflowY: 'auto',
+            borderRight: '1px solid var(--border-default)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.25rem'
+          }}
+          aria-label="Appointment detail and clinical review"
+        >
+          {actionSuccess && (
+            <div className="panel" style={{ backgroundColor: 'var(--success-bg)', borderColor: 'var(--success-border)', color: 'var(--success-text)', fontSize: '0.85rem' }}>
+              {actionSuccess}
+            </div>
+          )}
+          {actionError && (
+            <div className="panel" style={{ backgroundColor: 'var(--danger-bg)', borderColor: 'var(--danger-border)', color: 'var(--danger-text)', fontSize: '0.85rem' }}>
+              {actionError}
+            </div>
+          )}
 
-                  {/* Actions */}
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', paddingTop: '0.5rem' }}>
-                    <button
-                      onClick={() => handleReview(appt.id, 'completed')}
-                      disabled={savingId === appt.id}
-                      className="btn btn-primary btn-sm"
-                      title="Marks appointment complete and locks prescribing privileges"
-                    >
-                      <CheckCircle2 size={14} /> Complete Consultation & Lock
-                    </button>
-                    <button
-                      onClick={() => handleReview(appt.id, 'cancelled')}
-                      disabled={savingId === appt.id}
-                      className="btn btn-secondary btn-sm"
-                      style={{ color: 'var(--severity-crit)' }}
-                    >
-                      <XCircle size={14} /> Cancel Appointment
-                    </button>
-                    <button
-                      onClick={() => handleReview(appt.id, appt.status)}
-                      disabled={savingId === appt.id}
-                      className="btn btn-outline btn-sm"
-                    >
-                      <Send size={14} /> Save Notes Only
-                    </button>
-                  </div>
+          {!selectedAppt ? (
+            <p style={{ color: 'var(--text-muted)' }}>Select an appointment from the worklist to view details.</p>
+          ) : (
+            <>
+              <div>
+                <h2 style={{ fontSize: '1.3rem', marginBottom: '0.25rem' }}>
+                  Consultation: {selectedAppt.patient_name || `Patient #${selectedAppt.user_id}`}
+                </h2>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Scheduled: {new Date(selectedAppt.scheduled_at).toLocaleString('en-GB')}
                 </div>
-              );
-            })}
+              </div>
+
+              {/* Consultation notes form */}
+              <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <h3 style={{ fontSize: '1rem', margin: 0 }}>Clinical Review Notes</h3>
+                <textarea
+                  rows={4}
+                  value={reviewNotes}
+                  onChange={(e) => setReviewNotes(e.target.value)}
+                  placeholder="Enter clinical examination notes, impressions, or guidance..."
+                />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <label htmlFor="appt-status" style={{ fontSize: '0.8rem' }}>Status:</label>
+                    <select
+                      id="appt-status"
+                      value={statusAction}
+                      onChange={(e) => setStatusAction(e.target.value)}
+                      style={{ padding: '0.3rem 0.5rem', fontSize: '0.8rem', width: 'auto' }}
+                    >
+                      <option value="confirmed">Confirmed</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                  <button onClick={handleSaveReview} className="btn btn-primary" style={{ padding: '0.4rem 0.85rem' }}>
+                    Save review & status
+                  </button>
+                </div>
+              </div>
+
+              {/* Prescribe Medication Form (DOC-10) */}
+              <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <h3 style={{ fontSize: '1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Pill size={16} aria-hidden="true" />
+                  <span>Issue Linked Prescription (DOC-10)</span>
+                </h3>
+                <form onSubmit={handlePrescribe} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label htmlFor="doc-med-name" style={{ fontSize: '0.78rem' }}>Medication name *</label>
+                      <input
+                        id="doc-med-name"
+                        type="text"
+                        placeholder="e.g. Amoxicillin, Sumatriptan"
+                        value={medName}
+                        onChange={(e) => setMedName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label htmlFor="doc-med-dose" style={{ fontSize: '0.78rem' }}>Dosage *</label>
+                      <input
+                        id="doc-med-dose"
+                        type="text"
+                        placeholder="e.g. 500mg"
+                        value={medDosage}
+                        onChange={(e) => setMedDosage(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label htmlFor="doc-med-freq" style={{ fontSize: '0.78rem' }}>Frequency</label>
+                    <select
+                      id="doc-med-freq"
+                      value={medFrequency}
+                      onChange={(e) => setMedFrequency(e.target.value)}
+                    >
+                      <option value="Once Daily">Once Daily</option>
+                      <option value="Twice Daily">Twice Daily</option>
+                      <option value="Three Times Daily">Three Times Daily</option>
+                      <option value="As Needed (PRN)">As Needed (PRN)</option>
+                    </select>
+                  </div>
+
+                  <button type="submit" className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>
+                    Issue prescription to patient
+                  </button>
+                </form>
+              </div>
+            </>
+          )}
+        </section>
+
+        {/* Pane 3: Patient Summary Timeline */}
+        <aside
+          style={{
+            padding: '1.25rem',
+            backgroundColor: 'var(--bg-surface)',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem'
+          }}
+          aria-label="Patient clinical summary timeline"
+        >
+          <div style={{ paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-muted)' }}>
+            <h2 style={{ fontSize: '1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <User size={16} aria-hidden="true" />
+              <span>Patient Profile</span>
+            </h2>
+            {selectedAppt && (
+              <div style={{ marginTop: '0.5rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                <div><strong>Name:</strong> {selectedAppt.patient_name || 'N/A'}</div>
+                <div><strong>Age/Gender:</strong> {selectedAppt.patient_age ? `${selectedAppt.patient_age}y` : 'Unspecified'} {selectedAppt.patient_gender || ''}</div>
+                <div><strong>Chronic:</strong> {selectedAppt.patient_chronic_conditions || 'None reported'}</div>
+              </div>
+            )}
           </div>
-        )}
+
+          <div>
+            <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Appointment Context</h3>
+            {selectedAppt ? (
+              <div style={{ fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <div><strong>Complaint:</strong> {selectedAppt.symptom_name || 'General consultation'}</div>
+                {selectedAppt.patient_notes && (
+                  <div>
+                    <strong>Patient notes:</strong>
+                    <p style={{ marginTop: '0.2rem', color: 'var(--text-secondary)' }}>{selectedAppt.patient_notes}</p>
+                  </div>
+                )}
+                {selectedAppt.severity && (
+                  <div><strong>Reported Severity:</strong> {selectedAppt.severity}/10</div>
+                )}
+              </div>
+            ) : (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No patient selected</p>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );

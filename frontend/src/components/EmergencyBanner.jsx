@@ -1,18 +1,27 @@
 import React from 'react';
-import { AlertTriangle, ShieldAlert, PhoneCall } from 'lucide-react';
+import { AlertTriangle, ShieldAlert } from 'lucide-react';
 
 export default function EmergencyBanner({ isCritical = false }) {
   if (isCritical) {
     return (
-      <div className="alert-banner alert-emergency mb-6 shadow-md animate-fade-in">
-        <ShieldAlert className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-        <div className="flex-1">
-          <div className="font-bold text-red-900 dark:text-red-300 flex items-center gap-2">
-            <span>URGENT MEDICAL ATTENTION RECOMMENDED</span>
-            <span className="badge badge-critical text-xs">Emergency Alert</span>
+      <div
+        role="alert"
+        aria-live="assertive"
+        className="panel tier-urgent"
+        style={{
+          marginBottom: '1.25rem',
+          display: 'flex',
+          gap: '0.85rem',
+          alignItems: 'flex-start'
+        }}
+      >
+        <ShieldAlert size={22} style={{ color: 'var(--danger-text)', flexShrink: 0, marginTop: '2px' }} />
+        <div>
+          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--danger-text)' }}>
+            Urgent Medical Attention Recommended
           </div>
-          <p className="mt-1 text-sm text-red-800 dark:text-red-200">
-            Your reported symptoms suggest a high-severity or acute condition (such as chest pain, severe dyspnea, or neurological deficit). Please contact emergency ambulance services (<strong>108</strong> / <strong>102</strong>) or proceed to the nearest emergency department immediately.
+          <p style={{ marginTop: '0.25rem', fontSize: '0.875rem' }}>
+            Your reported symptoms suggest a high-severity or acute condition. Please contact emergency services (108 / 112 / 911) or proceed to the nearest emergency department immediately.
           </p>
         </div>
       </div>
@@ -20,13 +29,23 @@ export default function EmergencyBanner({ isCritical = false }) {
   }
 
   return (
-    <div className="alert-banner alert-warning mb-6 shadow-sm">
-      <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-      <div className="flex-1 text-xs">
-        <span className="font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 mr-2">Advisory Notice:</span>
-        <span className="text-amber-900 dark:text-amber-200">
-          SymptomLog is an advisory tracking tool and does not provide certified medical diagnoses. In life-threatening emergencies, call emergency services (<strong>108</strong> / <strong>102</strong>) immediately.
-        </span>
+    <div
+      role="note"
+      className="panel"
+      style={{
+        backgroundColor: 'var(--caution-bg)',
+        borderColor: 'var(--caution-border)',
+        borderLeft: '4px solid var(--caution-text)',
+        marginBottom: '1.25rem',
+        padding: '0.75rem 1rem',
+        display: 'flex',
+        gap: '0.65rem',
+        alignItems: 'center'
+      }}
+    >
+      <AlertTriangle size={18} style={{ color: 'var(--caution-text)', flexShrink: 0 }} />
+      <div style={{ fontSize: '0.82rem', color: 'var(--caution-text)' }}>
+        <strong>Advisory notice:</strong> SymptomLog is a record-keeping and triage guidance tool. It does not replace clinical evaluation. In an emergency, contact local emergency services immediately.
       </div>
     </div>
   );

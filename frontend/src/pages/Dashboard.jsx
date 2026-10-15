@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Activity,
-  PlusCircle,
-  Clock,
-  Pill,
   Calendar,
-  TrendingUp,
-  Sparkles,
-  ArrowRight,
-  ShieldCheck,
-  ChevronRight
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  PlusCircle,
+  HelpCircle,
+  Info
 } from 'lucide-react';
-import { entriesApi, medicationsApi, appointmentsApi, insightsApi } from '../api/client';
+import { entriesApi, medicationsApi, appointmentsApi, remindersApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
 export default function Dashboard() {
@@ -22,392 +20,335 @@ export default function Dashboard() {
   const [entries, setEntries] = useState([]);
   const [medications, setMedications] = useState([]);
   const [appointments, setAppointments] = useState([]);
-  const [insights, setInsights] = useState(null);
+  const [doses, setDoses] = useState([]);
+  const [adherence, setAdherence] = useState({ percentage: 100, taken: 0, missed: 0, total: 0 });
+  const [showWhyGuidance, setShowWhyGuidance] = useState(false);
 
   useEffect(() => {
-    async function loadDashboardData() {
+    async function fetchOverview() {
       try {
         setLoading(true);
-        const [entriesRes, medsRes, apptsRes, insightsRes] = await Promise.all([
-          entriesApi.getAll({ limit: 5 }),
-          medicationsApi.getAll(),
-          appointmentsApi.getAll(),
-          insightsApi.getInsights()
+        const [entriesRes, medsRes, apptsRes, dosesRes] = await Promise.all([
+          entriesApi.getAll({ limit: 10 }),
+          medicationsApi.getAll({ limit: 20 }),
+          appointmentsApi.getAll({ limit: 5 }),
+          remindersApi.getDoses({ limit: 50 }).catch(() => ({ data: { doses: [], adherence: null } }))
         ]);
-        setEntries(entriesRes.data.entries || []);
-        setMedications(medsRes.data.medications || []);
-        setAppointments(apptsRes.data.appointments || []);
-        setInsights(insightsRes.data.insights || null);
+
+        setEntries(entriesRes.data?.entries || []);
+        setMedications(medsRes.data?.medications || []);
+        setAppointments(apptsRes.data?.appointments || []);
+        setDoses(dosesRes.data?.doses || []);
+        if (dosesRes.data?.adherence) {
+          setAdherence(dosesRes.data.adherence);
+        }
       } catch (err) {
-        console.error('Error fetching dashboard data:', err);
+        console.error('[Overview Load Error]:', err);
       } finally {
         setLoading(false);
       }
     }
-    loadDashboardData();
+    fetchOverview();
   }, []);
 
-  const getSeverityBadgeClass = (severity) => {
-    if (severity <= 3) return 'badge-mild';
-    if (severity <= 6) return 'badge-moderate';
-    if (severity <= 8) return 'badge-severe';
-    return 'badge-critical';
+  // DASH-1: current date in long form (e.g. "Monday, 12 October 2026")
+  const dateFormatted = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  }).format(new Date());
+
+  const activeEntries = entries.filter((e) => !e.ended_at);
+  const latestEntry = entries[0] || null;
+
+  // Filter next upcoming appointment
+  const nextAppt = appointments
+    .filter((a) => a.status !== 'cancelled' && new Date(a.scheduled_at) >= new Date())
+    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))[0] || null;
+
+  // Helper for duration
+  const getDurationText = (startedAt) => {
+    if (!startedAt) return 'Onset date unrecorded';
+    const diffDays = Math.max(0, Math.round((new Date() - new Date(startedAt)) / (1000 * 60 * 60 * 24)));
+    if (diffDays === 0) return 'Started today';
+    if (diffDays === 1) return '1 day';
+    return `${diffDays} days`;
   };
 
-  const getClassificationBadge = (type) => {
-    switch (type) {
-      case 'Emergency Attention':
-        return <span className="badge badge-critical">🚨 Emergency</span>;
-      case 'Urgent Doctor Visit':
-        return <span className="badge badge-severe">🩺 Urgent Consult</span>;
-      case 'Routine Consultation':
-        return <span className="badge badge-moderate">📅 Routine Check</span>;
-      default:
-        return <span className="badge badge-mild">🏡 Home Care</span>;
-    }
-  };
-
-  if (loading) {
+  // Helper for segmented bar
+  const renderSegmentedBar = (sev) => {
+    const total = 10;
     return (
-      <div style={{ padding: '4rem 0', textAlign: 'center' }}>
-        <div style={{
-          width: '32px',
-          height: '32px',
-          border: '2.5px solid var(--border-subtle)',
-          borderTopColor: 'var(--accent-primary)',
-          borderRadius: '50%',
-          animation: 'spin 0.7s cubic-bezier(0.4, 0, 0.2, 1) infinite',
-          margin: '0 auto 1.25rem'
-        }} />
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 500 }}>Synchronizing health intelligence...</p>
+      <div style={{ display: 'inline-flex', gap: '2px', alignItems: 'center' }} aria-label={`Severity ${sev} of 10`}>
+        {Array.from({ length: total }, (_, i) => {
+          const filled = i < sev;
+          return (
+            <span
+              key={i}
+              style={{
+                width: '6px',
+                height: '14px',
+                borderRadius: '1px',
+                backgroundColor: filled ? `var(--sev-${Math.min(10, Math.max(1, sev))})` : 'var(--border-muted)',
+                display: 'inline-block'
+              }}
+            />
+          );
+        })}
       </div>
     );
-  }
-
-  const activeMeds = medications.filter((m) => m.active === 1 || m.active === true);
-  const upcomingAppts = appointments.filter((a) => a.status === 'scheduled');
-  const latestEntry = entries[0];
+  };
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
-      {/* Minimalist Hero Banner */}
-      <div style={{
-        background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.95) 0%, rgba(49, 46, 129, 0.95) 100%)',
-        backdropFilter: 'blur(12px)',
-        borderRadius: 'var(--radius-xl)',
-        padding: '2rem 2.25rem',
-        color: '#ffffff',
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '1.5rem',
-        boxShadow: 'var(--shadow-lg)',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        position: 'relative',
-        overflow: 'hidden'
-      }}>
-        <div style={{ maxWidth: '640px', position: 'relative', zIndex: 2 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.6rem' }}>
-            <span style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.18)',
-              padding: '0.2rem 0.65rem',
-              borderRadius: 'var(--radius-full)',
-              fontSize: '0.72rem',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em'
-            }}>
-              Personal Health Station
-            </span>
-            <span style={{ fontSize: '0.8rem', opacity: 0.85, fontWeight: 500 }}>
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
-            </span>
-          </div>
-          <h1 style={{ fontSize: '1.85rem', color: '#ffffff', marginBottom: '0.45rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
-            Welcome back, {user?.name || 'Patient'}
-          </h1>
-          <p style={{ color: 'rgba(255, 255, 255, 0.82)', fontSize: '0.925rem', lineHeight: 1.5 }}>
-            {entries.length > 0
-              ? `You have recorded ${entries.length} recent health entries. Longitudinal health intelligence active.`
-              : 'Begin logging your physical symptoms to calibrate real-time AI triage and physician summaries.'}
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', gap: '0.75rem', position: 'relative', zIndex: 2 }}>
-          <button
-            onClick={() => navigate('/log')}
-            className="btn"
-            style={{
-              backgroundColor: '#ffffff',
-              color: '#4f46e5',
-              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.12)',
-              fontWeight: 700
-            }}
-          >
-            <PlusCircle size={17} />
-            <span>Log Symptom</span>
-          </button>
-          <button
-            onClick={() => navigate('/reports')}
-            className="btn"
-            style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.12)',
-              color: '#ffffff',
-              border: '1px solid rgba(255, 255, 255, 0.25)',
-              backdropFilter: 'blur(8px)'
-            }}
-          >
-            <span>Clinical PDF</span>
-            <ArrowRight size={15} />
-          </button>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* DASH-1: Heading & Status Line */}
+      <div>
+        <h1 style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>{dateFormatted}</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.925rem' }}>
+          {activeEntries.length > 0
+            ? `${activeEntries.length} active symptom ${activeEntries.length === 1 ? 'record' : 'records'} currently monitored.`
+            : 'No active symptoms currently recorded. Routine monitoring.'}
+        </p>
       </div>
 
-      {/* Metrics Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.15rem' }}>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.15rem', padding: '1.25rem 1.4rem' }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: 'var(--radius-md)',
-            backgroundColor: 'var(--accent-primary-light)',
-            color: 'var(--accent-primary)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0
-          }}>
-            <Activity size={22} strokeWidth={2.2} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Total Entries
-            </div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em', marginTop: '0.1rem' }}>
-              {insights?.total_entries ?? entries.length}
-            </div>
-          </div>
-        </div>
-
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.15rem', padding: '1.25rem 1.4rem' }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: 'var(--radius-md)',
-            backgroundColor: 'var(--accent-teal-light)',
-            color: 'var(--accent-teal)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0
-          }}>
-            <Pill size={22} strokeWidth={2.2} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Medications
-            </div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em', marginTop: '0.1rem' }}>
-              {activeMeds.length}
-            </div>
-          </div>
-        </div>
-
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.15rem', padding: '1.25rem 1.4rem' }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: 'var(--radius-md)',
-            backgroundColor: 'var(--severity-mod-bg)',
-            color: 'var(--severity-mod)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0
-          }}>
-            <Calendar size={22} strokeWidth={2.2} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Doctor Visits
-            </div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em', marginTop: '0.1rem' }}>
-              {upcomingAppts.length}
-            </div>
-          </div>
-        </div>
-
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.15rem', padding: '1.25rem 1.4rem' }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: 'var(--radius-md)',
-            backgroundColor: 'var(--severity-sev-bg)',
-            color: 'var(--severity-sev)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0
-          }}>
-            <TrendingUp size={22} strokeWidth={2.2} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Avg Severity
-            </div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em', marginTop: '0.1rem' }}>
-              {insights?.avg_severity ? `${insights.avg_severity}/10` : 'N/A'}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Grid: Recent Entries & AI Triage Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.5rem' }}>
-        {/* Recent Symptom Logs */}
-        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.15rem' }}>
-            <h2 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700 }}>
-              <Clock size={18} style={{ color: 'var(--accent-primary)' }} />
-              Recent Symptom Entries
-            </h2>
-            <Link to="/history" style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-              View History <ChevronRight size={14} />
-            </Link>
-          </div>
-
-          {entries.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)' }}>
-              <Activity size={32} style={{ margin: '0 auto 0.75rem', opacity: 0.3 }} />
-              <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>No symptoms logged yet</p>
-              <p style={{ fontSize: '0.8rem', marginTop: '0.25rem' }}>Click below to create your first entry</p>
-              <button
-                onClick={() => navigate('/log')}
-                className="btn btn-primary btn-sm"
-                style={{ marginTop: '1rem' }}
-              >
-                Log Symptom
+      {/* Overview 2-column layout (UI-7) */}
+      <div className="overview-grid">
+        {/* Main Column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* DASH-2: Active Symptoms Table */}
+          <section className="panel" aria-labelledby="active-symptoms-heading">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 id="active-symptoms-heading" style={{ fontSize: '1.15rem' }}>Active symptoms</h2>
+              <button onClick={() => navigate('/log')} className="btn btn-primary" style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}>
+                <PlusCircle size={14} aria-hidden="true" />
+                <span>Log symptom</span>
               </button>
             </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              {entries.map((entry) => (
-                <div
-                  key={entry.id}
-                  onClick={() => navigate('/history')}
-                  style={{
-                    padding: '0.8rem 1rem',
-                    backgroundColor: 'var(--bg-tertiary)',
-                    borderRadius: 'var(--radius-md)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                    transition: 'all var(--transition-fast)',
-                    border: '1px solid transparent'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--bg-card-hover)';
-                    e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                    e.currentTarget.style.transform = 'translateX(2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)';
-                    e.currentTarget.style.borderColor = 'transparent';
-                    e.currentTarget.style.transform = 'none';
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <span className={`badge ${getSeverityBadgeClass(entry.severity)}`}>
-                      {entry.severity}/10
-                    </span>
+
+            {loading ? (
+              <div style={{ padding: '1.5rem 0', color: 'var(--text-muted)', fontSize: '0.875rem' }}>Loading active records...</div>
+            ) : activeEntries.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '1rem 0' }}>
+                Nothing logged yet. When you log a symptom it appears here with its severity over time.
+              </p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="clinical-table" aria-label="Active symptoms table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Symptom</th>
+                      <th scope="col">Duration</th>
+                      <th scope="col">Severity</th>
+                      <th scope="col">Triage tier</th>
+                      <th scope="col">Trend</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeEntries.map((e) => (
+                      <tr key={e.id}>
+                        <td>
+                          <strong style={{ display: 'block' }}>{e.symptom_name}</strong>
+                          {e.body_location && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{e.body_location}</span>}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{getDurationText(e.started_at)}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: 700, marginRight: '0.5rem' }}>{e.severity}/10</span>
+                          {renderSegmentedBar(e.severity)}
+                        </td>
+                        <td>
+                          <span className={`chip ${e.classification_type?.toLowerCase().includes('urgent') ? 'tier-urgent' : ''}`}>
+                            {e.classification_type || 'Routine Acute'}
+                          </span>
+                        </td>
+                        <td>
+                          {/* Mini SVG Trend Line */}
+                          <svg width="48" height="18" aria-hidden="true">
+                            <polyline
+                              fill="none"
+                              stroke="var(--primary)"
+                              strokeWidth="2"
+                              points={`0,${18 - (e.severity * 1.5)} 16,${18 - (Math.max(1, e.severity - 1) * 1.5)} 32,${18 - (e.severity * 1.5)} 48,${18 - (e.severity * 1.5)}`}
+                            />
+                          </svg>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* DASH-3: Today's Doses Checklist */}
+          <section className="panel" aria-labelledby="today-doses-heading">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 id="today-doses-heading" style={{ fontSize: '1.15rem' }}>Today's doses</h2>
+              <Link to="/medications" className="btn btn-text" style={{ fontSize: '0.8rem' }}>
+                Manage medicines &rarr;
+              </Link>
+            </div>
+
+            {medications.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+                No active medications prescribed or scheduled.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                {medications.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.65rem 0.85rem',
+                      border: '1px solid var(--border-muted)',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: 'var(--bg-surface-subtle)'
+                    }}
+                  >
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-                        {entry.symptom_name}
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                        {entry.body_location} • {new Date(entry.started_at).toLocaleDateString()}
+                      <strong style={{ fontSize: '0.9rem' }}>{m.name}</strong>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        {m.dosage} {m.frequency ? `— ${m.frequency}` : ''}
                       </div>
                     </div>
+                    <span className="chip" style={{ fontSize: '0.75rem' }}>
+                      Scheduled
+                    </span>
                   </div>
-                  <div>{getClassificationBadge(entry.classification_type)}</div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </section>
         </div>
 
-        {/* AI Health Intelligence & Triage Advice */}
-        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.15rem' }}>
-            <h2 style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700 }}>
-              <Sparkles size={18} style={{ color: '#f59e0b' }} />
-              Automated Triage & Insights
+        {/* Side Rail (UI-7, DASH-4, DASH-5) */}
+        <aside style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* DASH-4: Next Appointment */}
+          <section className="panel" aria-labelledby="next-appt-heading">
+            <h2 id="next-appt-heading" style={{ fontSize: '1rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Calendar size={16} aria-hidden="true" />
+              <span>Next appointment</span>
             </h2>
-            <Link to="/insights" style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-              Full Insights <ChevronRight size={14} />
-            </Link>
-          </div>
 
-          {latestEntry ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1, justifyContent: 'space-between' }}>
-              <div style={{
-                padding: '1rem 1.15rem',
-                backgroundColor: 'var(--bg-tertiary)',
-                borderRadius: 'var(--radius-md)',
-                borderLeft: '3px solid var(--accent-primary)'
-              }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--accent-primary)', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>
-                  Latest AI Triage ({latestEntry.symptom_name})
+            {nextAppt ? (
+              <div style={{ fontSize: '0.875rem' }}>
+                <div style={{ fontWeight: 600 }}>
+                  {new Date(nextAppt.scheduled_at).toLocaleDateString('en-GB', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric'
+                  })}
                 </div>
-                <div style={{ fontWeight: 600, fontSize: '0.925rem', marginBottom: '0.3rem', color: 'var(--text-primary)' }}>
-                  {latestEntry.recommendation}
+                <div style={{ color: 'var(--text-muted)' }}>
+                  {new Date(nextAppt.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </div>
-                <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                  {latestEntry.reasoning}
-                </p>
+                <div style={{ marginTop: '0.5rem', fontWeight: 500 }}>
+                  Dr. {nextAppt.doctor_name || 'Assigned Physician'}
+                </div>
+                {nextAppt.specialty && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{nextAppt.specialty}</div>}
               </div>
-
-              {insights?.frequent_triggers?.length > 0 && (
-                <div>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.45rem' }}>
-                    Frequent Triggers
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                    {insights.frequent_triggers.map((t, idx) => (
-                      <span key={idx} className="badge badge-primary">
-                        ⚡ {t.trigger} ({t.count}x)
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.7rem 0.95rem',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--accent-teal-light)',
-                color: 'var(--accent-teal)',
-                border: '1px solid rgba(20, 184, 166, 0.2)',
-                fontSize: '0.8rem',
-                fontWeight: 600
-              }}>
-                <ShieldCheck size={16} />
-                <span>Encrypted on-device health memory active</span>
+            ) : (
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                <p>No upcoming appointments scheduled.</p>
+                <Link to="/appointments" className="btn btn-secondary" style={{ marginTop: '0.65rem', width: '100%' }}>
+                  Book appointment
+                </Link>
               </div>
+            )}
+          </section>
+
+          {/* DASH-5: Latest Guidance with "Why am I seeing this?" disclosure */}
+          <section className="panel" aria-labelledby="latest-guidance-heading">
+            <h2 id="latest-guidance-heading" style={{ fontSize: '1rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Info size={16} aria-hidden="true" />
+              <span>Latest clinical guidance</span>
+            </h2>
+
+            {latestEntry?.recommendation ? (
+              <div style={{ fontSize: '0.85rem', lineHeight: 1.45 }}>
+                <p>{latestEntry.recommendation}</p>
+
+                <button
+                  onClick={() => setShowWhyGuidance(!showWhyGuidance)}
+                  className="btn btn-text"
+                  style={{ marginTop: '0.5rem', padding: 0, fontSize: '0.78rem' }}
+                  aria-expanded={showWhyGuidance}
+                >
+                  <HelpCircle size={13} aria-hidden="true" />
+                  <span>Why am I seeing this?</span>
+                  {showWhyGuidance ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                </button>
+
+                {showWhyGuidance && (
+                  <div
+                    style={{
+                      marginTop: '0.5rem',
+                      padding: '0.65rem',
+                      backgroundColor: 'var(--bg-surface-subtle)',
+                      border: '1px solid var(--border-muted)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.78rem',
+                      color: 'var(--text-muted)'
+                    }}
+                  >
+                    <div><strong>Rule applied:</strong> {latestEntry.triage_rule_id || 'ROUTINE_ACUTE'}</div>
+                    {latestEntry.reasoning && <div style={{ marginTop: '0.25rem' }}>{latestEntry.reasoning}</div>}
+                    <div style={{ marginTop: '0.25rem' }}><strong>Engine version:</strong> {latestEntry.triage_version || '1.1.0'}</div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                Guidance will appear here when you record a symptom.
+              </p>
+            )}
+          </section>
+
+          {/* DASH-5: 7-Day Adherence Summary */}
+          <section className="panel" aria-labelledby="adherence-heading">
+            <h2 id="adherence-heading" style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>
+              7-day medication adherence
+            </h2>
+
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.4rem' }}>
+              <span style={{ fontSize: '1.75rem', fontFamily: 'var(--font-serif)', fontWeight: 700, color: 'var(--primary)' }}>
+                {adherence.percentage ?? 100}%
+              </span>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>overall adherence</span>
             </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)' }}>
-              <Sparkles size={32} style={{ margin: '0 auto 0.75rem', opacity: 0.3 }} />
-              <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>No AI insights generated yet</p>
-              <p style={{ fontSize: '0.8rem', marginTop: '0.25rem' }}>Log symptoms to trigger personalized machine triage</p>
+
+            <div
+              style={{
+                height: '8px',
+                width: '100%',
+                backgroundColor: 'var(--border-muted)',
+                borderRadius: '4px',
+                overflow: 'hidden',
+                marginBottom: '0.5rem'
+              }}
+              role="progressbar"
+              aria-valuenow={adherence.percentage ?? 100}
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${adherence.percentage ?? 100}%`,
+                  backgroundColor: 'var(--primary)'
+                }}
+              />
             </div>
-          )}
-        </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              <span>Taken: {adherence.taken ?? 0}</span>
+              <span>Missed: {adherence.missed ?? 0}</span>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );
