@@ -400,12 +400,30 @@ function validateAndParseDataset(csvString) {
 
   const validRows = [];
   const labelsSet = new Set();
+  const classCounts = {};
   let malformedCount = 0;
+
+  function parseCsvRow(str) {
+    const cells = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let c of str) {
+      if (c === '"') {
+        inQuotes = !inQuotes;
+      } else if (c === ',' && !inQuotes) {
+        cells.push(cur);
+        cur = '';
+      } else {
+        cur += c;
+      }
+    }
+    cells.push(cur);
+    return cells;
+  }
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
-    // Handle simple quotes in CSV
-    const row = line.match(/(?:[^\s,"]|"(?:\\.|[^"])*")+/g) || line.split(',');
+    const row = parseCsvRow(line);
     const cleanTokens = row.map((cell) => cell.replace(/^["']|["']$/g, '').trim());
 
     const text = cleanTokens[textIndex];
@@ -414,6 +432,7 @@ function validateAndParseDataset(csvString) {
     if (text && label && text.length >= 3 && label.length >= 2) {
       validRows.push({ text, label });
       labelsSet.add(label);
+      classCounts[label] = (classCounts[label] || 0) + 1;
     } else {
       malformedCount++;
     }
@@ -441,13 +460,30 @@ function validateAndParseDataset(csvString) {
     };
   }
 
+  // ADMIN-11: basic class-balance stats -- the smallest class vs. the
+  // largest, and a ratio, so an administrator can see a badly imbalanced
+  // upload (e.g. one class with 2 rows against another with 400) before
+  // confirming a retrain on it, not just the overall row/class counts.
+  const counts = Object.values(classCounts);
+  const minClassCount = counts.length ? Math.min(...counts) : 0;
+  const maxClassCount = counts.length ? Math.max(...counts) : 0;
+  const classBalance = {
+    class_counts: classCounts,
+    min_class_count: minClassCount,
+    max_class_count: maxClassCount,
+    imbalance_ratio: minClassCount > 0 ? Math.round((maxClassCount / minClassCount) * 100) / 100 : null,
+    // Not an error -- a signal the confirm step should surface, not block.
+    is_imbalanced: minClassCount > 0 && maxClassCount / minClassCount >= 5
+  };
+
   return {
     valid: true,
     rows: validRows,
     totalCount: validRows.length,
     classes: Array.from(labelsSet),
     classesCount: labelsSet.size,
-    malformedCount
+    malformedCount,
+    classBalance
   };
 }
 
@@ -505,6 +541,40 @@ router.get('/dataset/status', authenticateAdmin, async (req, res) => {
   }
 });
 
+// POST /api/admin/dataset/validate (ADMIN-11): validates a candidate CSV
+// and returns class-balance stats WITHOUT saving the file or triggering a
+// retrain -- the "before retraining is confirmed" step. The actual
+// confirm-and-retrain action is still POST /dataset/upload.
+router.post('/dataset/validate', authenticateAdmin, upload.single('dataset'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return sendError(res, 400, 'Please upload a CSV dataset file.');
+    }
+    if (!req.file.originalname.toLowerCase().endsWith('.csv')) {
+      return sendError(res, 400, 'Invalid file format. Only .csv files are supported.');
+    }
+
+    const validation = validateAndParseDataset(req.file.buffer.toString('utf8'));
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error, validation_failed: true });
+    }
+
+    res.json({
+      message: 'Dataset is valid. Review the class-balance stats before confirming retraining.',
+      validation: {
+        total_samples: validation.totalCount,
+        classes_count: validation.classesCount,
+        classes: validation.classes,
+        malformed_skipped: validation.malformedCount,
+        class_balance: validation.classBalance
+      }
+    });
+  } catch (err) {
+    console.error('[Admin Dataset Validate Error]:', err);
+    sendError(res, 500, `Dataset validation failed: ${err.message}`);
+  }
+});
+
 // POST /api/admin/dataset/upload (Upload CSV, Validate, & Retrain ML Model)
 router.post('/dataset/upload', authenticateAdmin, upload.single('dataset'), async (req, res) => {
   try {
@@ -555,15 +625,18 @@ router.post('/dataset/upload', authenticateAdmin, upload.single('dataset'), asyn
       // Non-fatal if root is not writable
     }
 
-    // Trigger ML Microservice Model Retraining
+    // ADMIN-12: /retrain on the ML service is now asynchronous -- it
+    // returns a job id immediately rather than blocking this request on
+    // however long training takes. GET /dataset/retrain/:jobId polls it.
     let retrainResult = null;
     try {
       const mlResponse = await axios.post(
         `${ML_SERVICE_URL}/retrain`,
         {
-          custom_dataset_path: ML_DATA_PATH
+          custom_dataset_path: ML_DATA_PATH,
+          dataset_reference: `admin_upload:${originalName}`
         },
-        { timeout: 15000 }
+        { timeout: 5000 }
       );
       retrainResult = mlResponse.data;
     } catch (mlErr) {
@@ -574,19 +647,125 @@ router.post('/dataset/upload', authenticateAdmin, upload.single('dataset'), asyn
       };
     }
 
+    await recordAudit({
+      actorType: 'admin',
+      actorId: req.admin.id,
+      action: 'dataset_uploaded',
+      requestId: req.id,
+      metadata: { file_name: originalName, total_samples: validation.totalCount, job_id: retrainResult?.job_id }
+    });
+
     res.json({
-      message: 'Dataset validated and uploaded successfully. Machine Learning model retrained.',
+      message: 'Dataset validated and uploaded successfully. Model retraining has been queued.',
       validation: {
         total_samples: validation.totalCount,
         classes_count: validation.classesCount,
         classes: validation.classes,
-        malformed_skipped: validation.malformedCount
+        malformed_skipped: validation.malformedCount,
+        class_balance: validation.classBalance
       },
       retrain: retrainResult
     });
   } catch (err) {
     console.error('[Admin Dataset Upload Error]:', err);
     sendError(res, 500, `Dataset processing failed: ${err.message}`);
+  }
+});
+
+// GET /api/admin/dataset/retrain/:jobId (ADMIN-12): polls an async
+// retraining job's status/progress/result.
+router.get('/dataset/retrain/:jobId', authenticateAdmin, async (req, res) => {
+  try {
+    const mlRes = await axios.get(`${ML_SERVICE_URL}/retrain/${req.params.jobId}`, { timeout: 5000 });
+    res.json(mlRes.data);
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return sendError(res, 404, 'Retraining job not found');
+    }
+    console.error('[Admin Retrain Status Error]:', err.message);
+    sendError(res, 502, 'Failed to reach ML service for retraining job status');
+  }
+});
+
+// -------------------------------------------------------------
+// MODEL LIFECYCLE (ADMIN-13..15): thin proxies over the ML service's own
+// model-version registry. Kept here (admin-authenticated) rather than
+// exposed directly on the ML service, consistent with every other ML
+// capability (extract/predict/retrain) being reached only through this
+// backend.
+// -------------------------------------------------------------
+
+// GET /api/admin/models
+router.get('/models', authenticateAdmin, async (req, res) => {
+  try {
+    const mlRes = await axios.get(`${ML_SERVICE_URL}/models`, {
+      timeout: 5000,
+      params: req.query.model_type ? { model_type: req.query.model_type } : {}
+    });
+    res.json(mlRes.data);
+  } catch (err) {
+    console.error('[Admin List Models Error]:', err.message);
+    sendError(res, 502, 'Failed to reach ML service for model version history');
+  }
+});
+
+// POST /api/admin/models/activate
+router.post('/models/activate', authenticateAdmin, async (req, res) => {
+  try {
+    const { version_id, force } = req.body || {};
+    if (!version_id) {
+      return sendError(res, 400, 'version_id is required');
+    }
+    const mlRes = await axios.post(
+      `${ML_SERVICE_URL}/models/activate`,
+      { version_id, force: !!force },
+      { timeout: 10000 }
+    );
+    await recordAudit({
+      actorType: 'admin',
+      actorId: req.admin.id,
+      action: 'model_version_activated',
+      requestId: req.id,
+      metadata: { version_id, force: !!force }
+    });
+    res.json(mlRes.data);
+  } catch (err) {
+    if (err.response?.status === 404) return sendError(res, 404, err.response.data?.detail || 'Model version not found');
+    if (err.response?.status === 409) {
+      return sendError(res, 409, err.response.data?.detail || 'Model version does not meet the activation threshold', {
+        code: 'MODEL_BELOW_THRESHOLD'
+      });
+    }
+    console.error('[Admin Activate Model Error]:', err.message);
+    sendError(res, 502, 'Failed to reach ML service to activate model version');
+  }
+});
+
+// POST /api/admin/models/rollback
+router.post('/models/rollback', authenticateAdmin, async (req, res) => {
+  try {
+    const { version_id } = req.body || {};
+    if (!version_id) {
+      return sendError(res, 400, 'version_id is required');
+    }
+    const mlRes = await axios.post(`${ML_SERVICE_URL}/models/rollback`, { version_id }, { timeout: 10000 });
+    await recordAudit({
+      actorType: 'admin',
+      actorId: req.admin.id,
+      action: 'model_version_rolled_back',
+      requestId: req.id,
+      metadata: { version_id }
+    });
+    res.json(mlRes.data);
+  } catch (err) {
+    if (err.response?.status === 404) return sendError(res, 404, err.response.data?.detail || 'Model version not found');
+    if (err.response?.status === 409) {
+      return sendError(res, 409, err.response.data?.detail || 'Model version was never activated', {
+        code: 'MODEL_NEVER_ACTIVATED'
+      });
+    }
+    console.error('[Admin Rollback Model Error]:', err.message);
+    sendError(res, 502, 'Failed to reach ML service to roll back model version');
   }
 });
 
@@ -599,19 +778,20 @@ router.post('/dataset/upload', authenticateAdmin, upload.single('dataset'), asyn
 router.get('/audit-logs', authenticateAdmin, async (req, res) => {
   try {
     const { limit, offset } = parsePagination(req.query);
-    const { actor_type, action } = req.query;
+    // ADMIN-10: filter by actor, action, and/or a created_at date range.
+    const { actor_type, action, date_from, date_to } = req.query;
 
     let whereSql = '';
     const params = [];
     let paramIndex = 1;
-    if (actor_type) {
-      whereSql += ` WHERE actor_type = $${paramIndex++}`;
-      params.push(actor_type);
-    }
-    if (action) {
-      whereSql += `${whereSql ? ' AND' : ' WHERE'} action = $${paramIndex++}`;
-      params.push(action);
-    }
+    const addClause = (clause, value) => {
+      whereSql += `${whereSql ? ' AND' : ' WHERE'} ${clause.replace('?', `$${paramIndex++}`)}`;
+      params.push(value);
+    };
+    if (actor_type) addClause('actor_type = ?', actor_type);
+    if (action) addClause('action = ?', action);
+    if (date_from) addClause('created_at >= ?', new Date(date_from).toISOString());
+    if (date_to) addClause('created_at <= ?', new Date(date_to).toISOString());
 
     const countResult = await query(`SELECT COUNT(*) as total FROM audit_logs${whereSql}`, params);
     const total = parseInt(countResult.rows[0]?.total ?? 0, 10);

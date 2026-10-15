@@ -226,3 +226,16 @@ TEST-4,missing,,,not implemented — ML contract + fallback tests
 TEST-5,missing,,,not implemented — Playwright smoke e2e
 TEST-6,missing,,,not implemented — component tests
 TEST-7,missing,,,not implemented — synthetic-only seed/test data audit
+PRIV-1,done,backend/src/routes/authRoutes.js; migration 014,backend/tests/privacy.test.js,registration requires accept_terms=true and writes to consents table
+PRIV-2,done,backend/src/routes/accountRoutes.js,backend/tests/privacy.test.js,GET /api/account/export returns complete JSON export
+PRIV-3,done,backend/src/routes/accountRoutes.js; migration 014,backend/tests/privacy.test.js,POST/GET/DELETE /api/account/deletion-request lifecycle
+PRIV-4,done,backend/src/routes/accountRoutes.js,backend/tests/privacy.test.js,GET /api/account/access-log merges audit log and caregiver share access
+PRIV-5,done,backend/src/services/retentionJob.js,,scheduled cron purging expired requests/shares/logs
+PRIV-6,done,backend/src/services/retentionJob.js; migration 014,,ON DELETE CASCADE cleanups verified across all foreign keys
+ADMIN-10,done,backend/src/routes/adminRoutes.js,backend/tests/admin.test.js,GET /api/admin/audit-logs supports actor_type/action/date filters
+ADMIN-11,done,backend/src/routes/adminRoutes.js,backend/tests/admin.test.js,POST /api/admin/dataset/validate returns class balance distribution
+ADMIN-12,done,ml_service/jobs.py; main.py; adminRoutes.js,ml_service/tests/test_model_registry.py,async background retraining job with pollable status
+ADMIN-13,done,ml_service/model_registry.py; disease_model.py,,metrics-gated activation on holdout accuracy
+ADMIN-14,done,ml_service/model_registry.py; disease_model.py,ml_service/tests/test_model_registry.py,rollback active model to prior version
+ADMIN-15,done,ml_service/model_registry.py; adminRoutes.js,ml_service/tests/test_model_registry.py,GET /models lists version history
+CLIN-5,done,backend/src/services/classificationEngine.js,,static self-care advice with last reviewed date and pending clinical review label

@@ -33,8 +33,10 @@ const insightsRoutes = require('./routes/insightsRoutes');
 const caregiverRoutes = require('./routes/caregiverRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const pushRoutes = require('./routes/pushRoutes');
+const { router: accountRoutes } = require('./routes/accountRoutes');
 const { startReminderScheduler } = require('./services/reminderScheduler');
 const { startAppointmentReminderScheduler } = require('./services/appointmentReminderScheduler');
+const { startRetentionJob } = require('./services/retentionJob');
 
 const app = express();
 
@@ -167,6 +169,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/insights', insightsRoutes);
 app.use('/api/caregiver', caregiverRoutes);
 app.use('/api/push', pushRoutes);
+app.use('/api/account', accountRoutes);
 
 // Global 404 handler for API (API-1 envelope)
 app.use('/api/*', notFoundHandler);
@@ -180,6 +183,7 @@ async function startServer() {
     await initDB();
     startReminderScheduler();
     startAppointmentReminderScheduler();
+    startRetentionJob();
     app.listen(config.port, () => {
       logger.info(
         { port: config.port, dbMode: getDbMode(), nodeEnv: config.nodeEnv },

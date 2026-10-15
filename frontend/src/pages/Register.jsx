@@ -10,7 +10,8 @@ export default function Register() {
     password: '',
     age: '',
     gender: 'Female',
-    chronic_conditions: ''
+    chronic_conditions: '',
+    accept_terms: false
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,7 +19,8 @@ export default function Register() {
   const navigate = useNavigate();
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, type, checked, value } = e.target;
+    setFormData({ ...formData, [name]: type === 'checkbox' ? checked : value });
   };
 
   const handleSubmit = async (e) => {
@@ -229,6 +231,22 @@ export default function Register() {
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Quick logs & alarm schedules</div>
               </button>
             </div>
+          </div>
+
+          <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+            <input
+              id="accept_terms"
+              name="accept_terms"
+              type="checkbox"
+              checked={formData.accept_terms}
+              onChange={handleChange}
+              required
+              style={{ marginTop: '0.2rem' }}
+            />
+            <label htmlFor="accept_terms" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              I agree to the Terms of Service and Privacy Policy, including that my symptom and
+              health data will be processed to provide triage guidance. *
+            </label>
           </div>
 
           <button

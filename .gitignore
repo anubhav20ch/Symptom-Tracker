@@ -4,6 +4,8 @@ __pycache__/
 .env
 backend/uploads/
 backend/data/
+ml_service/data/model_artifacts/
+ml_service/data/model_versions.json
 *.sqlite
 *.sqlite3
 dist/

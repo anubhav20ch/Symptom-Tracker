@@ -89,12 +89,34 @@ function getRecommendedSpecialist(symptom, category) {
   return 'General Physician / Primary Care Provider';
 }
 
+// CLIN-5: self-care guidance is static content, not generated or altered by
+// any model -- these strings are a fixed lookup table, picked by keyword
+// match, never produced by the ML service or an LLM call. SELF_CARE_LAST_REVIEWED
+// and the "pending clinical review" label are what make that static status
+// visible to the patient rather than implicit; both are appended to every
+// piece of advice this module returns, and bumping the reviewed date (or
+// clearing the pending flag once a clinician actually signs off) is the
+// only way this text is meant to change, not a code edit to the advice body.
+const SELF_CARE_LAST_REVIEWED = '2026-01-15';
+const SELF_CARE_PENDING_CLINICAL_REVIEW = true;
+
+function withGovernanceLabel(adviceText) {
+  const reviewNote = SELF_CARE_PENDING_CLINICAL_REVIEW
+    ? `(Self-care content last reviewed ${SELF_CARE_LAST_REVIEWED} -- pending formal clinical sign-off.)`
+    : `(Self-care content last reviewed ${SELF_CARE_LAST_REVIEWED}.)`;
+  return `${adviceText} ${reviewNote}`;
+}
+
 function getSelfCareAdvice(symptom, category, severity) {
   if (symptom.includes('headache') || symptom.includes('migraine')) {
-    return 'Self-care: Rest in a calm, dark environment. Stay hydrated, apply a cold or warm compress, and consider appropriate over-the-counter pain relief if needed. If episodes recur frequently, consult a Neurologist.';
+    return withGovernanceLabel(
+      'Self-care: Rest in a calm, dark environment. Stay hydrated, apply a cold or warm compress, and consider appropriate over-the-counter pain relief if needed. If episodes recur frequently, consult a Neurologist.'
+    );
   }
   if (symptom.includes('throat') || symptom.includes('cough') || symptom.includes('cold')) {
-    return 'Self-care: Drink warm fluids with honey/lemon, use saline throat gargles or lozenges, and run a room humidifier. If high fever or severe pain develops, consult an ENT Specialist or General Physician.';
+    return withGovernanceLabel(
+      'Self-care: Drink warm fluids with honey/lemon, use saline throat gargles or lozenges, and run a room humidifier. If high fever or severe pain develops, consult an ENT Specialist or General Physician.'
+    );
   }
   if (
     symptom.includes('stomach') ||
@@ -103,10 +125,14 @@ function getSelfCareAdvice(symptom, category, severity) {
     symptom.includes('abdomen') ||
     symptom.includes('nausea')
   ) {
-    return 'Self-care: Eat light, bland meals, avoid acidic/spicy foods, and sip electrolytes. Avoid lying flat immediately after eating. If pain persists or worsens, consult a Gastroenterologist.';
+    return withGovernanceLabel(
+      'Self-care: Eat light, bland meals, avoid acidic/spicy foods, and sip electrolytes. Avoid lying flat immediately after eating. If pain persists or worsens, consult a Gastroenterologist.'
+    );
   }
   if (symptom.includes('back') || symptom.includes('joint') || symptom.includes('muscle')) {
-    return 'Self-care: Apply alternating ice/heat packs for 15-20 minutes, perform gentle mobility stretches, avoid heavy lifting, and rest the affected area. For chronic joint pain, consult an Orthopedist or Rheumatologist.';
+    return withGovernanceLabel(
+      'Self-care: Apply alternating ice/heat packs for 15-20 minutes, perform gentle mobility stretches, avoid heavy lifting, and rest the affected area. For chronic joint pain, consult an Orthopedist or Rheumatologist.'
+    );
   }
   if (
     symptom.includes('rash') ||
@@ -114,9 +140,13 @@ function getSelfCareAdvice(symptom, category, severity) {
     symptom.includes('skin') ||
     symptom.includes('acne')
   ) {
-    return 'Self-care: Keep the skin clean and dry, avoid scratching or harsh scrubbing, use a gentle fragrance-free moisturizer, and avoid known allergens. For persistent rash, consult a Dermatologist.';
+    return withGovernanceLabel(
+      'Self-care: Keep the skin clean and dry, avoid scratching or harsh scrubbing, use a gentle fragrance-free moisturizer, and avoid known allergens. For persistent rash, consult a Dermatologist.'
+    );
   }
-  return 'Self-care: Monitor symptom progression, prioritize adequate sleep, maintain hydration, and rest. If symptoms worsen or persist beyond 7-10 days, consult a General Physician.';
+  return withGovernanceLabel(
+    'Self-care: Monitor symptom progression, prioritize adequate sleep, maintain hydration, and rest. If symptoms worsen or persist beyond 7-10 days, consult a General Physician.'
+  );
 }
 
 /**
@@ -297,7 +327,12 @@ async function classifySymptomEntry({
     reasoning: `Acute episode rule: Short duration (${durationDays} days < 14 days) and isolated occurrence. Pain ${sev}/10, Emotion ${emotion}/10. Suitable for self-care and monitoring.`,
     disclaimer: MEDICAL_DISCLAIMER,
     triage_version: TRIAGE_ENGINE_VERSION,
-    rule_id: 'ROUTINE_ACUTE'
+    rule_id: 'ROUTINE_ACUTE',
+    // CLIN-5: structured form of the same governance label baked into
+    // `recommendation`'s text, so a UI can render the "pending clinical
+    // review" badge without parsing free text for it.
+    self_care_last_reviewed: SELF_CARE_LAST_REVIEWED,
+    self_care_pending_clinical_review: SELF_CARE_PENDING_CLINICAL_REVIEW
   };
 }
 
@@ -306,5 +341,7 @@ module.exports = {
   MEDICAL_DISCLAIMER,
   getRecommendedSpecialist,
   getSelfCareAdvice,
-  TRIAGE_ENGINE_VERSION
+  TRIAGE_ENGINE_VERSION,
+  SELF_CARE_LAST_REVIEWED,
+  SELF_CARE_PENDING_CLINICAL_REVIEW
 };

@@ -35,6 +35,11 @@ const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 const LOCKOUT_DURATION_MS = 30 * 60 * 1000;
 
+// PRIV-1: bump this when the Terms of Service / Privacy Policy text
+// materially changes, so `consents` keeps an accurate record of which
+// version of the terms a given registration actually accepted.
+const CONSENT_VERSION = '1.0';
+
 // Issues a new access token + rotatable refresh token for a user, storing
 // only the refresh token's hash and delivering the raw value as an
 // HttpOnly, SameSite cookie so it is inaccessible to client-side JS (XSS-safe).
@@ -110,6 +115,15 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
     } catch (e) {
       user.chronic_conditions = [];
     }
+
+    // PRIV-1: consent is recorded as part of account creation itself --
+    // before any symptom/health data can exist for this user, since the
+    // account row above is the first thing that has to exist for any of
+    // that data to be insertable at all.
+    await query(
+      'INSERT INTO consents (user_id, consent_version) VALUES ($1, $2)',
+      [user.id, CONSENT_VERSION]
+    );
 
     const token = await issueSession(res, user);
     await recordAudit({ actorType: 'patient', actorId: user.id, action: 'account_registered', requestId: req.id });

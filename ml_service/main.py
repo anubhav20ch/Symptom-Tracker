@@ -5,6 +5,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import jobs
+import model_registry
 from dataset import CANONICAL_SYMPTOMS
 from disease_model import disease_model_instance
 from model import model_instance
@@ -212,20 +214,85 @@ def list_supported_diseases():
 
 class RetrainRequest(BaseModel):
     custom_dataset_path: Optional[str] = None
+    dataset_reference: Optional[str] = None
+    # ADMIN-13 override: activate the newly trained version even if its
+    # holdout accuracy doesn't clear MIN_HOLDOUT_ACCURACY_THRESHOLD.
+    force_activate: Optional[bool] = False
 
 
+# ADMIN-12: retraining now runs as an asynchronous background job. The
+# triggering request returns a job id immediately; GET /retrain/{job_id}
+# polls status/progress/result instead of the caller blocking on however
+# long training actually takes.
 @app.post("/retrain")
 def retrain_model(req: Optional[RetrainRequest] = None):
+    job_id = jobs.create_job("disease_retrain")
+
+    def _run():
+        jobs.update_job(job_id, status="running", progress=10)
+        try:
+            stats = disease_model_instance.train(
+                custom_path=req.custom_dataset_path if req else None,
+                dataset_reference=req.dataset_reference if req else None,
+                force_activate=bool(req and req.force_activate),
+            )
+            jobs.update_job(job_id, status="completed", progress=100, result=stats)
+        except Exception as e:
+            jobs.update_job(job_id, status="failed", progress=100, error=str(e))
+
+    jobs.run_in_background(_run)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/retrain/{job_id}")
+def retrain_job_status(job_id: str):
+    job = jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Retraining job not found")
+    return job
+
+
+# ADMIN-15: full model-version history (metrics + activation status).
+@app.get("/models")
+def list_model_versions(model_type: Optional[str] = None):
+    return {"versions": model_registry.list_entries(model_type)}
+
+
+class ActivateModelRequest(BaseModel):
+    version_id: str
+    # ADMIN-13 override: bypass the metrics gate for a brand-new version.
+    force: Optional[bool] = False
+
+
+# ADMIN-13: activates a specific trained version, subject to metrics-gated
+# activation unless explicitly overridden.
+@app.post("/models/activate")
+def activate_model_version(req: ActivateModelRequest):
     try:
-        custom_path = req.custom_dataset_path if req else None
-        stats = disease_model_instance.train(custom_path=custom_path)
-        return {
-            "status": "success",
-            "message": "Disease prediction model successfully retrained and deployed.",
-            "metrics": stats,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Model retraining failed: {str(e)}")
+        entry = disease_model_instance.activate_version(req.version_id, force=req.force)
+        return {"status": "activated", "version": entry}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+class RollbackModelRequest(BaseModel):
+    version_id: str
+
+
+# ADMIN-14: rolls back to any previously activated version, no gate
+# re-check (it already cleared the gate, or was explicitly overridden,
+# the first time it went live).
+@app.post("/models/rollback")
+def rollback_model_version(req: RollbackModelRequest):
+    try:
+        entry = disease_model_instance.rollback_to(req.version_id)
+        return {"status": "rolled_back", "version": entry}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 if __name__ == "__main__":

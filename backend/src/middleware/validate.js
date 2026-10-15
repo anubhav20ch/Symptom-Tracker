@@ -58,7 +58,16 @@ const registerSchema = z.object({
     .string()
     .max(100)
     .refine(isValidTimeZone, { message: 'Unrecognized IANA time zone' })
-    .optional()
+    .optional(),
+  // PRIV-1: explicit, timestamped consent to data processing, required
+  // before any health data can be stored for this account. A missing or
+  // false value fails validation rather than defaulting to "accepted" --
+  // consent that isn't actively given isn't consent.
+  accept_terms: z
+    .boolean({ message: 'You must accept the Terms of Service and Privacy Policy to register' })
+    .refine((v) => v === true, {
+      message: 'You must accept the Terms of Service and Privacy Policy to register'
+    })
 });
 
 const loginSchema = z.object({

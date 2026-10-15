@@ -8,7 +8,7 @@ describe('AUTH-12 password policy', () => {
   it('rejects a password shorter than 10 characters', async () => {
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ name: 'Test', email: 'policytest1@example.com', password: 'short1' });
+      .send({ name: 'Test', email: 'policytest1@example.com', password: 'short1', accept_terms: true });
     expect(res.status).toBe(400);
     expect(res.body.error.details.some((d) => d.field === 'password')).toBe(true);
   });
@@ -16,14 +16,14 @@ describe('AUTH-12 password policy', () => {
   it('rejects a password with no digit', async () => {
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ name: 'Test', email: 'policytest2@example.com', password: 'onlyletters' });
+      .send({ name: 'Test', email: 'policytest2@example.com', password: 'onlyletters', accept_terms: true });
     expect(res.status).toBe(400);
   });
 
   it('accepts a password meeting the policy', async () => {
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ name: 'Test', email: `policytest3-${Date.now()}@example.com`, password: 'ValidPass123' });
+      .send({ name: 'Test', email: `policytest3-${Date.now()}@example.com`, password: 'ValidPass123', accept_terms: true });
     expect(res.status).toBe(201);
   });
 });
